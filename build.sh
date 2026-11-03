@@ -23,8 +23,9 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSUIElement</key><true/>
     <!-- Português ou inglês, escolhido nos Ajustes: o app grava AppleLanguages e os menus do sistema
-         seguem no próximo início. Sem as duas línguas aqui, o macOS ignoraria a escolha. -->
-    <key>CFBundleDevelopmentRegion</key><string>pt-BR</string>
+         seguem no próximo início. Sem as duas línguas aqui, o macOS ignoraria a escolha. Sistema em
+         outra língua (espanhol) cai na região de desenvolvimento: inglês, o mesmo padrão do app. -->
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleLocalizations</key><array><string>pt-BR</string><string>en</string></array>
 </dict>
 </plist>
