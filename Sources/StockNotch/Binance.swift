@@ -11,19 +11,8 @@ struct Credencial: Sendable {
 enum Binance {
     // Recusa chave que pode negociar, transferir ou sacar: o app só precisa ler saldos.
     static func verificar(_ cred: Credencial) async throws {
-        struct Restricoes: Decodable {
-            let enableReading: Bool
-            let enableWithdrawals: Bool?
-            let enableInternalTransfer: Bool?
-            let permitsUniversalTransfer: Bool?
-            let enableSpotAndMarginTrading: Bool?
-            let enableMargin: Bool?
-            let enableFutures: Bool?
-        }
-        let r: Restricoes = try await assinado("/sapi/v1/account/apiRestrictions", "", cred)
-        let perigosas = [r.enableWithdrawals, r.enableInternalTransfer, r.permitsUniversalTransfer,
-                         r.enableSpotAndMarginTrading, r.enableMargin, r.enableFutures]
-        guard r.enableReading, !perigosas.contains(true) else {
+        let p: Permissoes = try await assinado("/sapi/v1/account/apiRestrictions", "", cred)
+        guard p.soLeitura else {
             throw Falha("Use uma chave só de leitura: na Binance, deixe marcado apenas “Ativar leitura”.",
                         "Use a read-only key: on Binance, leave only “Enable Reading” checked.")
         }
@@ -62,6 +51,28 @@ enum Binance {
         var req = URLRequest(url: url)
         req.setValue(cred.chave, forHTTPHeaderField: "X-MBX-APIKEY")
         return try await baixar(req)
+    }
+}
+
+// Resposta do apiRestrictions: só os campos ligados (true). Lista de permitidos, não de proibidos: uma permissão
+// nova da Binance (como as opções europeias ou a Portfolio Margin) é recusada até alguém conferir que só lê.
+struct Permissoes: Decodable {
+    let ligadas: Set<String>
+
+    static let deLeitura: Set<String> = ["enableReading", "enableFixReadOnly"]
+
+    var soLeitura: Bool {
+        ligadas.contains("enableReading")
+            && ligadas.allSatisfy { !($0.hasPrefix("enable") || $0.hasPrefix("permits")) || Self.deLeitura.contains($0) }
+    }
+
+    init(from decoder: any Decoder) throws {
+        // Campo que não é true (false, número, texto, null) não liga nada.
+        struct Campo: Decodable {
+            let ligado: Bool
+            init(from decoder: any Decoder) throws { ligado = (try? decoder.singleValueContainer().decode(Bool.self)) ?? false }
+        }
+        ligadas = Set(try decoder.singleValueContainer().decode([String: Campo].self).filter(\.value.ligado).keys)
     }
 }
 
