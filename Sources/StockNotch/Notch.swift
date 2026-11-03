@@ -165,9 +165,10 @@ struct NotchView: View {
         }
         .task(id: expandido) {
             // Rede de segurança: se o macOS não avisar que o mouse saiu (ex.: aberto por clique), fecha mesmo assim.
+            // Com o VoiceOver não: quem abriu pela ação dele não tem o mouse ali, e fecha pela ação "Fechar".
             while expandido && !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
-                if expandido && !mouseNaJanela() {
+                if expandido && !mouseNaJanela() && !NSWorkspace.shared.isVoiceOverEnabled {
                     estado.mouseDentro = false
                     withAnimation(animacao) { expandido = false }
                 }
@@ -233,6 +234,9 @@ struct NotchView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(atualAcessivel)
         .accessibilityHint(tr("Passe o mouse ou clique para ver a carteira", "Hover or click to see your portfolio"))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { withAnimation(animacao) { expandido = true } }
+        .accessibilityAction(named: tr("Abrir painel", "Open StockNotch"), abrirPainel)
     }
 
     private var atualAcessivel: String {
@@ -274,6 +278,10 @@ struct NotchView: View {
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
         .foregroundStyle(.white)
+        .accessibilityAction(named: tr("Fechar", "Close")) {
+            estado.mouseDentro = false
+            withAnimation(animacao) { expandido = false }
+        }
     }
 
     private var vazio: some View {
@@ -298,7 +306,7 @@ struct NotchView: View {
                     Text(tr("Patrimônio", "Portfolio value"))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text(dinheiro(total.patrimonio, total.moeda))
+                    Text(valor: dinheiro(total.patrimonio, total.moeda))
                         .font(.system(size: 26, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .contentTransition(.numericText())
@@ -315,18 +323,10 @@ struct NotchView: View {
                     }
                 }
             }
-        } else {
-            let moedas = carteira.semCambio.joined(separator: ", ")
+        } else if let aviso = carteira.avisoTotal {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                // Câmbio velho não entra no total: melhor nenhum do que um que mistura instantes diferentes.
-                if let parado = carteira.cambioParado {
-                    Text(tr("Total indisponível: o câmbio de \(moedas) para \(carteira.moeda) não atualiza desde \(momento(parado)).",
-                            "Total unavailable: the \(moedas) to \(carteira.moeda) exchange rate hasn't updated since \(momento(parado))."))
-                } else {
-                    Text(tr("Total indisponível: falta o câmbio de \(moedas) para \(carteira.moeda).",
-                            "Total unavailable: no exchange rate from \(moedas) to \(carteira.moeda)."))
-                }
+                Text(aviso)
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
@@ -345,7 +345,7 @@ struct NotchView: View {
                     .tracking(0.6)
                     .foregroundStyle(.secondary)
                     .padding(.top, manuais.isEmpty ? 0 : 4)
-                ForEach(binance) { LinhaNotch(linha: $0, falhou: false) }
+                ForEach(binance) { LinhaNotch(linha: $0, falhou: carteira.falhas.contains($0.ativo.id)) }
             }
             if ocultos > 0 {
                 Button(tr("Mais \(ocultos) no painel", "\(ocultos) more in StockNotch"), action: abrirPainel)
@@ -420,34 +420,42 @@ struct LinhaNotch: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                Text(situacao)
+                Text(valor: situacao)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             if let c = linha.cotacao {
                 MiniGrafico(pontos: carteira.serie(linha), cotacao: c)
+                // Largura mínima de um preço de seis dígitos: os minigráficos formam coluna.
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(dinheiro(c.preco, c.moeda, oculto: false))
                         .font(.system(size: 13, weight: .medium))
                         .contentTransition(.numericText())
                     // Preço na moeda do ativo; resultado e valor da posição na moeda escolhida, pela conta do total.
+                    // Sem o percentual, que não cabe na linha: ele fica na dica e no VoiceOver (na tabela, embaixo).
                     if r.custo > 0 {
-                        TextoResultado(resultado: r.aberto, moeda: r.moeda)
+                        let completo = "\(dinheiro(r.aberto.lucro, r.moeda, sinal: true)) (\(pct(r.aberto.percentual)))"
+                        TextoResultado(resultado: r.aberto, moeda: r.moeda, comPercentual: false)
                             .font(.system(size: 11))
+                            .help(completo)
+                            .accessibilityLabel(falado(completo))
                     } else if linha.quantidade > 0 {
                         // Saldo da Binance sem preço médio: só o valor.
-                        Text(dinheiro(r.patrimonio, r.moeda))
+                        Text(valor: dinheiro(r.patrimonio, r.moeda))
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
-                    } else if r.realizado != 0 {
+                    }
+                    // Venda parcial também: o realizado aparece aqui como na tabela do painel.
+                    if r.realizado != 0 {
                         HStack(spacing: 4) {
                             Text(tr("Realizado", "Realized")).foregroundStyle(.secondary)
                             TextoResultado(resultado: Resultado(lucro: r.realizado, percentual: 0), moeda: r.moeda, comPercentual: false)
                         }
-                        .font(.system(size: 11))
+                        .font(.system(size: r.custo > 0 ? 10 : 11))
                     }
                 }
+                .frame(minWidth: 100, alignment: .trailing)
                 .monospacedDigit()
                 Pilula(fracao: c.variacao)
                     .frame(width: 74, alignment: .trailing)
@@ -459,6 +467,30 @@ struct LinhaNotch: View {
                 ProgressView().controlSize(.small)
             }
         }
+        // Uma linha por texto: sem espaço, encolhe um pouco em vez de quebrar ou virar "ao…".
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
         .accessibilityElement(children: .combine)
+    }
+}
+
+extension Carteira {
+    // Por que não há total, no notch e no painel com o mesmo texto. Câmbio velho não entra no total: melhor nenhum do
+    // que um que mistura instantes diferentes. O app só busca o câmbio do dólar e do euro: outra moeda nunca converte.
+    var avisoTotal: String? {
+        guard total == nil else { return nil }
+        let faltando = cambiosFaltando.isEmpty ? semCambio : cambiosFaltando
+        let fora = faltando.filter { !["USD", "EUR"].contains($0) }
+        if !fora.isEmpty {
+            let lista = fora.joined(separator: ", ")
+            return tr("Total indisponível: o app não converte \(lista) (só real, dólar e euro).",
+                      "Total unavailable: StockNotch can't convert \(lista) (only BRL, USD and EUR).")
+        }
+        let lista = faltando.joined(separator: ", ")
+        if let parado = cambioParado {
+            return tr("Total indisponível: o câmbio de \(lista) não atualiza desde \(momento(parado, agora: agora)).",
+                      "Total unavailable: the \(lista) exchange rate hasn't updated since \(momento(parado, agora: agora)).")
+        }
+        return tr("Total indisponível: falta o câmbio de \(lista).", "Total unavailable: no \(lista) exchange rate.")
     }
 }

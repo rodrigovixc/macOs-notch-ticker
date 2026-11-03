@@ -95,6 +95,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     return oculto ? texto.replacing(#/\d[\d.,]*/#, with: "••••") : texto
 }
 
+// Para o VoiceOver: "R$ oculto" em vez de ler os pontos do modo privacidade um por um.
+@MainActor func falado(_ texto: String) -> String { texto.replacingOccurrences(of: "••••", with: tr("oculto", "hidden")) }
+
+extension Text {
+    // Valor ou quantidade da carteira (dinheiro, qtd): oculto no modo privacidade, dito "oculto" pelo VoiceOver.
+    @MainActor init(valor texto: String) {
+        self = Text(texto).accessibilityLabel(falado(texto))
+    }
+}
+
 @MainActor func pct(_ fracao: Double, sinal: Bool = true, idioma: Idioma = Ajustes.atual.idioma) -> String {
     var estilo = FloatingPointFormatStyle<Double>.Percent(locale: idioma.locale).precision(.fractionLength(2))
     if sinal { estilo = estilo.sign(strategy: .always()) }
@@ -238,10 +248,13 @@ struct TextoResultado: View {
     let moeda: String
     var comPercentual = true
 
+    // Uma linha só: sem espaço (coluna estreita, número grande), encolhe um pouco em vez de virar "…".
     var body: some View {
         let valor = dinheiro(resultado.lucro, moeda, sinal: true)
-        Text(comPercentual ? "\(valor) (\(pct(resultado.percentual)))" : valor)
+        Text(valor: comPercentual ? "\(valor) (\(pct(resultado.percentual)))" : valor)
             .foregroundStyle(cor(resultado.lucro))
             .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
     }
 }

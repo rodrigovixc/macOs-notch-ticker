@@ -66,8 +66,18 @@ struct CarteiraTela: View {
     private var selecionado: Ativo? { carteira.ativos.first { $0.id == selecao } }
 
     var body: some View {
+        let semGravar = carteira.erroArquivo != nil
         Group {
-            if carteira.ativos.isEmpty {
+            if let erro = carteira.erroArquivo, carteira.ativos.isEmpty {
+                // Arquivo ilegível abre a carteira vazia: dizer "Nenhum ativo" faria parecer que as operações sumiram.
+                ContentUnavailableView {
+                    Label(tr("A carteira não está sendo salva", "Your portfolio isn't being saved"), systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(mensagem(erro))
+                } actions: {
+                    Button(tr("Mostrar no Finder", "Show in Finder")) { mostrarNoFinder(carteira.arquivo) }
+                }
+            } else if carteira.ativos.isEmpty {
                 ContentUnavailableView {
                     Label(tr("Nenhum ativo", "No assets"), systemImage: "chart.line.uptrend.xyaxis")
                 } description: {
@@ -81,11 +91,33 @@ struct CarteiraTela: View {
                 tabela
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let erro = carteira.erroArquivo, !carteira.ativos.isEmpty {
+                Faixa {
+                    Label(mensagem(erro), systemImage: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+                    Spacer()
+                    Button(tr("Mostrar no Finder", "Show in Finder")) { mostrarNoFinder(carteira.arquivo) }
+                }
+            }
+        }
+        // O mesmo aviso do notch: sem câmbio, valor e resultado de cada linha ficam na moeda do ativo.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !carteira.ativos.isEmpty, let aviso = carteira.avisoTotal {
+                Faixa {
+                    Label(aviso + tr(" Enquanto isso, valor e resultado ficam na moeda de cada ativo.",
+                                     " Meanwhile, value and return stay in each asset's currency."),
+                          systemImage: "exclamationmark.triangle.fill")
+                        .symbolRenderingMode(.multicolor)
+                    Spacer()
+                }
+            }
+        }
         .navigationTitle(tr("Carteira", "Portfolio"))
         .toolbar {
             ToolbarItem {
                 Button { adicionando = true } label: { Label(tr("Adicionar ativo", "Add Asset"), systemImage: "plus") }
                     .help(tr("Adicionar ação ou cripto", "Add a stock or crypto"))
+                    .disabled(semGravar)
             }
             ToolbarItem {
                 Button { vendoOperacoes = selecionado } label: { Label(tr("Operações", "Transactions"), systemImage: "list.bullet.rectangle") }
@@ -109,7 +141,8 @@ struct CarteiraTela: View {
             Button(tr("Remover", "Remove"), role: .destructive) { carteira.remover(ativo) }
         } message: { ativo in
             let n = ativo.compras.count + ativo.vendas.count
-            Text(tr("O histórico de \(n) operação(ões) será apagado.", "The history of \(n) transaction(s) will be deleted."))
+            let m = ativo.alertas.count
+            Text(tr("\(n) operação(ões) e \(m) alerta(s) serão apagados.", "\(n) transaction(s) and \(m) alert(s) will be deleted."))
         }
     }
 
@@ -137,15 +170,15 @@ struct CarteiraTela: View {
             }
             .width(min: 100, ideal: 120)
             TableColumn(tr("Quantidade", "Quantity")) { l in
-                Text(l.quantidade > 0 ? qtd(l.quantidade) : "—")
+                Text(valor: l.quantidade > 0 ? qtd(l.quantidade) : "—")
             }
-            .width(min: 60, ideal: 70)
+            .width(min: 70, ideal: 80)
             .alignment(.trailing)
             // Preço médio na moeda das compras e cotação na do ativo; valor e resultado na moeda escolhida.
             TableColumn(tr("Preço médio", "Avg. Price")) { l in
-                Text(l.quantidade > 0 ? dinheiro((l.custo ?? 0) / l.quantidade, l.moedaCusto) : "—")
+                Text(valor: l.quantidade > 0 ? dinheiro((l.custo ?? 0) / l.quantidade, l.moedaCusto) : "—")
             }
-            .width(min: 80, ideal: 100)
+            .width(min: 85, ideal: 100)
             .alignment(.trailing)
             TableColumn(tr("Cotação", "Price")) { l in
                 if let c = l.cotacao {
@@ -174,22 +207,26 @@ struct CarteiraTela: View {
             TableColumn(tr("Valor", "Value")) { l in
                 let r = carteira.resumo(l)
                 if l.cotacao != nil, l.quantidade > 0 {
-                    Text(dinheiro(r.patrimonio, r.moeda))
+                    Text(valor: dinheiro(r.patrimonio, r.moeda))
                 } else {
                     Text("—").foregroundStyle(.secondary)
                 }
             }
-            .width(min: 80, ideal: 110)
+            .width(min: 90, ideal: 110)
             .alignment(.trailing)
+            // Percentual embaixo, como o selo da cotação: lado a lado não cabe na largura padrão da janela.
             TableColumn(tr("Em aberto", "Unrealized")) { l in
                 let r = carteira.resumo(l)
                 if r.custo > 0 {
-                    TextoResultado(resultado: r.aberto, moeda: r.moeda)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        TextoResultado(resultado: r.aberto, moeda: r.moeda, comPercentual: false)
+                        Text(pct(r.aberto.percentual)).font(.caption).foregroundStyle(cor(r.aberto.lucro))
+                    }
                 } else {
                     Text("—").foregroundStyle(.secondary)
                 }
             }
-            .width(min: 110, ideal: 150)
+            .width(min: 90, ideal: 120)
             .alignment(.trailing)
             TableColumn(tr("Realizado", "Realized")) { l in
                 let r = carteira.resumo(l)
@@ -203,22 +240,48 @@ struct CarteiraTela: View {
             .alignment(.trailing)
         }
         .monospacedDigit()
+        // Coluna estreita: o número encolhe um pouco em vez de virar "…".
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
         .contextMenu(forSelectionType: Ativo.ID.self) { ids in
             if let ativo = carteira.ativos.first(where: { $0.id == ids.first }) {
+                let semGravar = carteira.erroArquivo != nil
                 Button(tr("Ver operações…", "View Transactions…")) { vendoOperacoes = ativo }
                 Button(tr("Registrar compra…", "Record Purchase…")) { registrando = Registro(ativo: ativo, venda: false) }
+                    .disabled(semGravar)
                 Button(tr("Registrar venda…", "Record Sale…")) { registrando = Registro(ativo: ativo, venda: true) }
-                    .disabled(ativo.posicao.quantidade <= 0)
+                    .disabled(ativo.posicao.quantidade <= 0 || semGravar)
                 Button(tr("Alertas de preço…", "Price Alerts…")) { vendoAlertas = ativo }
                 Divider()
                 Button(tr("Remover \(ativo.simbolo)", "Remove \(ativo.simbolo)"), role: .destructive) {
-                    if ativo.compras.isEmpty && ativo.vendas.isEmpty { carteira.remover(ativo) } else { removendo = ativo }
+                    let vazio = ativo.compras.isEmpty && ativo.vendas.isEmpty && ativo.alertas.isEmpty
+                    if vazio { carteira.remover(ativo) } else { removendo = ativo }
                 }
             }
         } primaryAction: { ids in
             vendoOperacoes = carteira.ativos.first { $0.id == ids.first }
         }
     }
+}
+
+// Faixa de aviso no topo ou no rodapé de uma tela, com o fundo da barra de ferramentas.
+private struct Faixa<Conteudo: View>: View {
+    @ViewBuilder let conteudo: Conteudo
+
+    var body: some View {
+        HStack { conteudo }
+            .font(.callout)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.bar)
+    }
+}
+
+// O carteira.json, ou a pasta dele quando ele não existe (a gravação falhou antes de criá-lo).
+@MainActor func mostrarNoFinder(_ arquivo: URL) {
+    let existe = FileManager.default.fileExists(atPath: arquivo.path)
+    NSWorkspace.shared.activateFileViewerSelecting([existe ? arquivo : arquivo.deletingLastPathComponent()])
 }
 
 // Qual formulário abrir: compra ou venda de um ativo.
@@ -261,15 +324,15 @@ struct OperacoesFolha: View {
                 }
                 .width(min: 90, ideal: 110)
                 TableColumn(tr("Quantidade", "Quantity")) { l in
-                    Text(qtd(l.operacao.quantidade))
+                    Text(valor: qtd(l.operacao.quantidade))
                 }
                 .alignment(.trailing)
                 TableColumn(tr("Preço", "Price")) { l in
-                    Text(dinheiro(l.operacao.preco, moeda))
+                    Text(valor: dinheiro(l.operacao.preco, moeda))
                 }
                 .alignment(.trailing)
                 TableColumn("Total") { l in
-                    Text(dinheiro(l.operacao.quantidade * l.operacao.preco, moeda))
+                    Text(valor: dinheiro(l.operacao.quantidade * l.operacao.preco, moeda))
                 }
                 .alignment(.trailing)
                 TableColumn("") { l in
@@ -299,13 +362,13 @@ struct OperacoesFolha: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(tr("Registrar venda", "Record Sale")) { if let ativo { registrando = Registro(ativo: ativo, venda: true) } }
-                    .disabled((ativo?.posicao.quantidade ?? 0) <= 0)
+                    .disabled((ativo?.posicao.quantidade ?? 0) <= 0 || carteira.erroArquivo != nil)
                 Button { if let ativo { registrando = Registro(ativo: ativo, venda: false) } } label: {
                     Label(tr("Registrar compra", "Record Purchase"), systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(ativo == nil)
+                .disabled(ativo == nil || carteira.erroArquivo != nil)
             }
             .padding(20)
         }
@@ -358,11 +421,16 @@ struct AlertasFolha: View {
                     let exemplo = tipo == .variacao ? tr("2,5", "2.5") : tr("55,20", "55.20")
                     TextField(tipo == .variacao ? tr("Variação (%)", "Change (%)") : tr("Preço (\(moeda))", "Price (\(moeda))"), text: $texto,
                               prompt: Text(exemplo))
-                        .onSubmit { adicionar(novo, a: ativo) }
+                        .onSubmit { if cotacao != nil && carteira.erroArquivo == nil { adicionar(novo, a: ativo) } }
                     if !texto.isEmpty && novo == nil {
                         Text(tr("Use um número maior que zero, como \(exemplo).", "Use a number greater than zero with a period for decimals, like \(exemplo)."))
                             .font(.caption)
                             .foregroundStyle(.red)
+                    } else if cotacao == nil {
+                        // A moeda do alerta é a da cotação: antes dela, SAP.DE ficaria em US$ e nunca conferiria.
+                        Text(tr("Aguardando a primeira cotação para saber a moeda do ativo.", "Waiting for the first quote to know the asset's currency."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     } else if let novo, let cotacao, cotacao.moeda == moeda, novo.distancia(cotacao) >= 0 {
                         Text(tr("A cotação já chegou lá: o aviso vem assim que você adicionar.", "The price is already there: you'll be notified as soon as you add it."))
                             .font(.caption)
@@ -371,7 +439,7 @@ struct AlertasFolha: View {
                     HStack {
                         Spacer()
                         Button(tr("Adicionar alerta", "Add Alert")) { adicionar(novo, a: ativo) }
-                            .disabled(novo == nil || ativo == nil)
+                            .disabled(novo == nil || ativo == nil || cotacao == nil || carteira.erroArquivo != nil)
                     }
                 }
 
@@ -385,7 +453,16 @@ struct AlertasFolha: View {
                                 .foregroundStyle(.secondary)
                                 .frame(width: 16)
                                 .accessibilityHidden(true)
-                            Text(alerta.descricao).monospacedDigit()
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(alerta.descricao).monospacedDigit()
+                                // Ação tem uma moeda só: alerta em outra (criado antes da cotação, numa versão antiga) não confere.
+                                if let cotacao, ativo?.cripto == false, alerta.moeda != cotacao.moeda {
+                                    Text(tr("A cotação é em \(cotacao.moeda): este alerta nunca dispara. Apague e crie de novo.",
+                                            "The price is in \(cotacao.moeda): this alert never fires. Delete it and add it again."))
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
                             Spacer()
                             if alerta.disparado {
                                 Label(tr("Atingido", "Triggered"), systemImage: "bell.badge")
@@ -529,17 +606,22 @@ struct BinanceTela: View {
                             Monograma(ativo: l.ativo, tamanho: 22)
                             Text(l.ativo.simbolo).fontWeight(.semibold)
                             Spacer()
-                            Text(qtd(l.quantidade)).foregroundStyle(.secondary)
+                            Text(valor: qtd(l.quantidade)).foregroundStyle(.secondary)
                             if let c = l.cotacao {
                                 let r = carteira.resumo(l)
+                                // Como no notch e na tabela da Carteira: a idade do dado e o desenho do dia junto do valor.
                                 VStack(alignment: .trailing, spacing: 1) {
-                                    Text(dinheiro(r.patrimonio, r.moeda))
+                                    Text(valor: dinheiro(r.patrimonio, r.moeda))
                                     if r.custo > 0 {
                                         TextoResultado(resultado: r.aberto, moeda: r.moeda).font(.caption)
                                     }
+                                    SeloCotacao(cotacao: c, agora: carteira.agora).font(.caption).foregroundStyle(.secondary)
                                 }
                                 .frame(minWidth: 110, alignment: .trailing)
+                                MiniGrafico(pontos: carteira.serie(l), cotacao: c)
                                 Pilula(fracao: c.variacao)
+                            } else if carteira.falhas.contains(l.ativo.id) {
+                                Text(tr("sem cotação", "no quote")).foregroundStyle(.secondary)
                             } else if carteira.faltaCambio(l) {
                                 Text(tr("sem câmbio", "no exchange rate")).foregroundStyle(.secondary)
                             }
@@ -601,15 +683,16 @@ private struct CampoPrecoMedio: View {
         Group {
             if Ajustes.atual.privacidade {
                 // O campo mostraria o número: no modo privacidade fica só a leitura, oculta.
-                LabeledContent(moeda, value: carteira.precoMedioBinance[moeda].map { dinheiro($0, "BRL") } ?? tr("Não informado", "Not set"))
+                LabeledContent(moeda) { Text(valor: carteira.precoMedioBinance[moeda].map { dinheiro($0, "BRL") } ?? tr("Não informado", "Not set")) }
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     TextField(moeda, text: $texto, prompt: Text(tr("Não informado", "Not set")))
                         .focused($focado)
+                        .disabled(carteira.erroArquivo != nil)  // não seria salvo
                         .onSubmit(salvar)
                         .onChange(of: focado) { if !focado { salvar() } }
                     if invalido {
-                        Text(tr("Use um número maior que zero, como 350000 ou 1,25.", "Use a number greater than zero, like 350000 or 1.25."))
+                        Text(tr("Use um número maior que zero, como 350.000 ou 1,25.", "Use a number greater than zero, like 350,000 or 1.25."))
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
@@ -617,7 +700,7 @@ private struct CampoPrecoMedio: View {
                 .onDisappear(perform: salvar)  // ligar o modo privacidade (ou trocar de aba) no meio da edição não a perde
             }
         }
-        // Sem separador de milhar: em português numero() leria "350.000" como 350.
+        // Sem separador de milhar: o número volta ao campo como se costuma digitar (numero() aceita os dois).
         .task(id: idioma) {
             texto = carteira.precoMedioBinance[moeda]?
                 .formatted(FloatingPointFormatStyle<Double>(locale: idioma.locale).grouping(.never).precision(.fractionLength(0...8))) ?? ""
@@ -699,15 +782,15 @@ struct FormAdicionar: View {
                     TextField(tr("Quantidade", "Quantity"), text: $quantidade, prompt: Text(ehCripto ? tr("0,05", "0.05") : "100"))
                     if case .semSaldo(let disponivel) = problema {
                         let dia = quando(data, data: .abbreviated)
-                        Text(disponivel > 0 ? tr("Disponível para vender em \(dia): \(qtd(disponivel)).", "Available to sell on \(dia): \(qtd(disponivel)).")
+                        Text(valor: disponivel > 0 ? tr("Disponível para vender em \(dia): \(qtd(disponivel)).", "Available to sell on \(dia): \(qtd(disponivel)).")
                              : tr("Não há \(codigo) para vender em \(dia).", "No \(codigo) to sell on \(dia)."))
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
                     TextField(tr("Preço por unidade", "Price per unit"), text: $preco, prompt: Text(tr("32,50", "32.50")))
                     if !semCompra && operacao == nil {
-                        Text(tr("Preencha quantidade e preço com números maiores que zero.",
-                                "Enter quantity and price as numbers greater than zero, with a period for decimals (32.50)."))
+                        Text(tr("Preencha quantidade e preço com números maiores que zero, como 1.234,50.",
+                                "Enter quantity and price as numbers greater than zero, like 1,234.50."))
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
@@ -743,7 +826,7 @@ struct FormAdicionar: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!valido)
+                .disabled(!valido || carteira.erroArquivo != nil)  // não seria salvo: o painel mostra o porquê
             }
             .padding()
         }
@@ -828,8 +911,10 @@ private struct SecaoAbrirComMac: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in ler() }
     }
 
+    // Esperando aprovação, o aviso laranja já explica e leva aos Itens de Início: o erro do register() seria repetido.
     private func ler() {
         if emPacote { status = SMAppService.mainApp.status }
+        if status == .requiresApproval { erro = nil }
     }
 
     private func alternar(_ ligar: Bool) {
@@ -837,9 +922,12 @@ private struct SecaoAbrirComMac: View {
         do {
             if ligar { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
-            // Só o código: o texto do sistema viria no idioma em que o app abriu.
+            // Só o código: o texto do sistema viria no idioma em que o app abriu. O comum (1, sem permissão) ganha texto.
             let codigo = (error as NSError).code
-            erro = Falha("Não consegui mudar a abertura com o Mac (erro \(codigo)).", "Couldn't change opening at login (error \(codigo)).")
+            erro = codigo == Int(EPERM) || codigo == kSMErrorLaunchDeniedByUser
+                ? Falha("O macOS não deixou: libere o StockNotch em Ajustes do Sistema > Geral > Itens de Início.",
+                        "macOS didn't allow it: allow StockNotch in System Settings > General > Login Items.")
+                : Falha("Não consegui mudar a abertura com o Mac (erro \(codigo)).", "Couldn't change opening at login (error \(codigo)).")
         }
         ler()
     }
