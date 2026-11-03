@@ -2,16 +2,18 @@
 
 # StockNotch
 
-A native macOS widget that lives in the MacBook notch and shows live stock and crypto prices, daily change and your portfolio's profit and loss. Hover the notch to expand it; move away and it tucks back in.
+[![CI](https://github.com/rodrigovixc/macOs-notch-ticker/actions/workflows/ci.yml/badge.svg)](https://github.com/rodrigovixc/macOs-notch-ticker/actions/workflows/ci.yml)
 
-Built with SwiftUI and AppKit, no third-party dependencies.
+A native macOS widget that lives in the MacBook notch and shows stock and crypto prices, daily change and your portfolio's profit and loss. Hover the notch to expand it; move away and it tucks back in.
+
+Built with SwiftUI and AppKit, no third-party dependencies. The interface is in Brazilian Portuguese or English.
 
 ## Features
 
 - **Notch widget**: a black panel that blends with the notch, cycles through your assets (`PETR4 ▲ 1.20%`) and expands on hover into a full portfolio view. On displays without a notch it becomes a small pill centered on the menu bar.
-- **Stocks and crypto**: Brazilian (B3) and US stocks via Yahoo Finance, refreshed every 10 seconds; crypto streamed live from the Binance public WebSocket, with the REST API as a fallback. Daily change uses the same definition as Google Finance in each market.
+- **Stocks and crypto**: Brazilian (B3) and US stocks via Yahoo Finance, refreshed every 10 seconds (US stocks in real time; B3 15 minutes delayed, like Google Finance); crypto streamed live from the Binance public WebSocket, with the REST API as a fallback. Daily change uses the same definition as Google Finance in each market.
 - **Intraday sparkline**: a small chart of the day next to each price, in the expanded notch and in the management table. Green or red with the day's change, with a subtle dashed line at the previous close, and it always ends at the price shown beside it.
-- **Data age at a glance**: each price carries a badge: *live*, the source delay (*15 min* for B3), *closed*, or a warning with the time of the last update when a price hasn't refreshed for over 2 minutes.
+- **Data age at a glance**: each price carries a badge: *live*, the source delay (*15 min* for B3), *closed*, the quote's time when the source can't confirm it's current, or a warning with the time of the last update when a price hasn't refreshed for over 2 minutes.
 - **Profit and loss**: record purchases and sales and see average cost, unrealized and realized P&L per asset and a single portfolio total (value, today's change, unrealized and realized return). Uses the average-cost method.
 - **Language and currency**: Brazilian Portuguese or English, and totals in BRL, USD or EUR (**Settings** in the management window). Each asset's price stays in its own currency (PETR4 in R$, AAPL in US$); position value, P&L and totals are converted with Yahoo Finance exchange rates fetched in the same refresh as the prices.
 - **Binance account sync (read-only)**: connect an API key and your spot and Simple Earn Flexible balances show up automatically. Enter your average purchase price per coin (in BRL) to include them in unrealized P&L.
@@ -24,7 +26,20 @@ Built with SwiftUI and AppKit, no third-party dependencies.
 ## Requirements
 
 - macOS 15 (Sequoia) or later
-- Xcode 16 or later (Swift 6)
+- To build from source: Xcode 16 or later (Swift 6)
+
+## Download
+
+Get the latest `StockNotch-<version>.zip` from [Releases](https://github.com/rodrigovixc/macOs-notch-ticker/releases/latest). The release build is for Apple Silicon.
+
+1. Unzip it and move `StockNotch.app` to `/Applications`.
+2. The app is ad-hoc signed (no Apple Developer ID), so Gatekeeper blocks the first launch: right-click the app → **Open**. If macOS only offers to move it to the Trash (macOS 15 and later), go to **System Settings → Privacy & Security** and click **Open Anyway**.
+
+Or remove the quarantine flag in Terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/StockNotch.app
+```
 
 ## Build and run
 
@@ -35,7 +50,7 @@ cd macOs-notch-ticker
 open StockNotch.app
 ```
 
-`build.sh` compiles a release build, wraps it in an app bundle and signs it locally (ad-hoc). Drag the app to `/Applications` and turn on **Open at login** in **Settings** to start it with your Mac. If macOS asks for approval, the app says so and opens **System Settings → General → Login Items** for you.
+`build.sh` compiles a release build, wraps it in an app bundle and signs it locally (ad-hoc). Drag the app to `/Applications` and turn on **Open at login** in **Settings** to start it with your Mac. If macOS asks for approval, the app says so and has a button that opens **System Settings → General → Login Items**.
 
 Open at login and notifications need the app bundle: when run with `swift run`, the switch is disabled and alerts don't notify.
 
@@ -52,10 +67,11 @@ The app checks the key's permissions and refuses any key that can trade, transfe
 
 | Market | Source | Delay | Daily change (same as Google Finance) |
 |---|---|---|---|
-| B3 (e.g. `PETR4`, `VALE3`) | Yahoo Finance chart (unofficial), every 10 s | 15 min, like Google (real-time B3 data is paid) | vs. the previous official close |
+| B3 (e.g. `PETR4`, `VALE3`) | Yahoo Finance chart (unofficial), every 10 s | 15 min, like Google (real-time B3 data is paid): the badge says *15 min*, never *live* | vs. the previous official close |
 | US stocks (e.g. `AAPL`) | Yahoo Finance chart (unofficial), every 10 s | real time | regular session vs. the previous regular close (pre- and after-market excluded) |
+| Other Yahoo symbols (other exchanges) | Yahoo Finance chart (unofficial), every 10 s | unknown: the badge shows the quote's time, never *live* | vs. Yahoo's previous close (not checked against Google) |
 | Exchange rates (USD/BRL, EUR/BRL) | Yahoo Finance chart (unofficial), every 10 s; AwesomeAPI when Yahoo fails | real time (AwesomeAPI: cached up to 5 min) | since 00:00 UTC |
-| Crypto (e.g. `BTC`, `ETH`) | Binance WebSocket (`<coin>usdt@kline_1d`), REST `ticker/tradingDay` as fallback | real time | since 00:00 UTC (not the last 24 h) |
+| Crypto (e.g. `BTC`, `ETH`) | Binance WebSocket (`<coin>usdt@kline_1d`), REST `ticker/tradingDay` as fallback; a coin without a USDT pair uses its BRL pair over REST every 10 s | real time | since 00:00 UTC (not the last 24 h) |
 | Intraday chart | Yahoo Finance chart with 5-minute bars (stocks, USD/BRL); Binance 15-minute klines since 00:00 UTC (crypto), every 60 s | as the quote | — |
 
 - Crypto is priced like Google's `BTC-BRL`: the coin's USDT price times the USD/BRL rate of the same moment, with the change of both since 00:00 UTC. Binance's own BRL pairs drift 0.3–0.9% from Google, so they aren't used. USDT is taken as one US dollar; it usually trades about 0.15% above it, which is most of the remaining gap to Google. With USD chosen as the currency, crypto stays at its USDT price (like Google's `BTC-USD`) and needs no exchange rate at all.
@@ -93,6 +109,8 @@ The app checks the key's permissions and refuses any key that can trade, transfe
 swift test
 ```
 
+[CI](.github/workflows/ci.yml) builds and runs them on every push and pull request (macOS 26, latest stable Xcode). Pushing a `v*` tag publishes the zipped app to [Releases](https://github.com/rodrigovixc/macOs-notch-ticker/releases).
+
 The tests cover the intraday chart (Yahoo 5-minute bars and Binance klines from real captured responses, empty bars, the last point matching the price shown, series from another day or ahead of the quote, crypto converted to BRL point by point, fixed prices), price alert crossings (fires once, re-arms only past the margin, daily change both ways, already past on creation), the quote each alert is checked against (its own currency, not the display one), alerts saved in `carteira.json` (and files without them), privacy-mode masking and its setting, the Binance WebSocket messages (a real captured kline and the `serverShutdown` notice), Yahoo quotes with quote time, delay and trading period (real captured responses), the data-age rules (live, delayed, closed, stale, Yahoo's wrong B3 hours, holidays), frozen quotes and fixed prices, the snapshot with a single exchange rate (crypto converted like Google's `BTC-BRL`, stale rates left out, crypto in USD without a rate), the AwesomeAPI fallback (a real captured response), Binance balances without an exchange rate, tick grouping and reconnection waits (including silent connections), average-cost P&L with sales (several purchases, partial sale, full sale and buyback, same-day purchase and sale), sale validation, reading the old `carteira.json` format, realized P&L in totals, currency conversion and the single converted total (including Binance balances and missing exchange rates), symbol normalization, decimal parsing in both languages (`1.234,56`, `0.5`, `1,234.56`), translations, currency formatting per language, settings defaults and persistence, Binance request signing, checked against the example in the Binance documentation, and the read-only key check (an `apiRestrictions` response with a permission the app doesn't list is refused). They also cover reading `carteira.json` from disk (missing file vs. a folder or broken link), thousands separators and invalid numbers (`350.000`, `0,050`, `inf`), daily-change alerts re-arming on a new day, crypto in BRL timed by its older part, Yahoo's wrong B3 hours right after 17:00, and Binance balances without a quote.
 
 ## Project structure
@@ -111,3 +129,7 @@ Sources/StockNotch/
 ├── Grafico.swift   # intraday sparkline: series, fitting to the price shown, Swift Charts view
 └── Binance.swift   # signed read-only API calls and Keychain storage
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
