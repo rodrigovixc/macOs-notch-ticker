@@ -1,0 +1,105 @@
+import CryptoKit
+import Foundation
+import Security
+
+struct Credencial: Sendable {
+    let chave: String
+    let segredo: String
+}
+
+// Conta da Binance, só leitura. Endpoints: https://developers.binance.com/docs/binance-spot-api-docs
+enum Binance {
+    // Recusa chave que pode negociar, transferir ou sacar: o app só precisa ler saldos.
+    static func verificar(_ cred: Credencial) async throws {
+        struct Restricoes: Decodable {
+            let enableReading: Bool
+            let enableWithdrawals: Bool?
+            let enableInternalTransfer: Bool?
+            let permitsUniversalTransfer: Bool?
+            let enableSpotAndMarginTrading: Bool?
+            let enableMargin: Bool?
+            let enableFutures: Bool?
+        }
+        let r: Restricoes = try await assinado("/sapi/v1/account/apiRestrictions", "", cred)
+        let perigosas = [r.enableWithdrawals, r.enableInternalTransfer, r.permitsUniversalTransfer,
+                         r.enableSpotAndMarginTrading, r.enableMargin, r.enableFutures]
+        guard r.enableReading, !perigosas.contains(true) else {
+            throw Falha("Use uma chave só de leitura: na Binance, deixe marcado apenas “Ativar leitura”.")
+        }
+    }
+
+    static func saldos(_ cred: Credencial) async throws -> [String: Double] {
+        struct Conta: Decodable {
+            let balances: [Saldo]
+            struct Saldo: Decodable { let asset, free, locked: String }
+        }
+        let conta: Conta = try await assinado("/api/v3/account", "omitZeroBalances=true", cred)
+        var saldos: [String: Double] = [:]
+        for s in conta.balances {
+            let qtd = (Double(s.free) ?? 0) + (Double(s.locked) ?? 0)
+            // Simple Earn flexível aparece como "LD" + moeda (LDBTC); LDO (Lido) tem 3 letras e escapa
+            let moeda = s.asset.hasPrefix("LD") && s.asset.count > 3 ? String(s.asset.dropFirst(2)) : s.asset
+            if qtd > 0 { saldos[moeda, default: 0] += qtd }
+        }
+        return saldos
+    }
+
+    static func assinatura(_ consulta: String, segredo: String) -> String {
+        HMAC<SHA256>.authenticationCode(for: Data(consulta.utf8), using: SymmetricKey(data: Data(segredo.utf8)))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    private struct Hora: Decodable { let serverTime: Int64 }
+
+    private static func assinado<T: Decodable>(_ caminho: String, _ parametros: String, _ cred: Credencial) async throws -> T {
+        // Usa o relógio da Binance: com o do Mac adiantado ou atrasado ela recusa o pedido (erro -1021).
+        let hora: Hora = try await baixar("https://api.binance.com/api/v3/time")
+        let consulta = (parametros.isEmpty ? "" : parametros + "&") + "recvWindow=10000&timestamp=\(hora.serverTime)"
+        let assinatura = assinatura(consulta, segredo: cred.segredo)
+        guard let url = URL(string: "https://api.binance.com\(caminho)?\(consulta)&signature=\(assinatura)") else { throw URLError(.badURL) }
+        var req = URLRequest(url: url)
+        req.setValue(cred.chave, forHTTPHeaderField: "X-MBX-APIKEY")
+        return try await baixar(req)
+    }
+}
+
+// A Secret Key fica nas Chaves do macOS (Keychain), nunca no carteira.json.
+enum Chaveiro {
+    private static let servico = "io.github.rodrigovixc.stocknotch.binance"
+
+    static func salvar(_ cred: Credencial) throws {
+        apagar()
+        let item: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: servico,
+            kSecAttrAccount as String: cred.chave,
+            kSecValueData as String: Data(cred.segredo.utf8),
+        ]
+        let status = SecItemAdd(item as CFDictionary, nil)
+        guard status == errSecSuccess else { throw Falha("Não consegui guardar a chave no Keychain (erro \(status)).") }
+    }
+
+    static func ler() -> Credencial? {
+        let busca: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: servico,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var resultado: CFTypeRef?
+        guard SecItemCopyMatching(busca as CFDictionary, &resultado) == errSecSuccess,
+              let item = resultado as? [String: Any],
+              let chave = item[kSecAttrAccount as String] as? String,
+              let dados = item[kSecValueData as String] as? Data,
+              let segredo = String(data: dados, encoding: .utf8)
+        else { return nil }
+        return Credencial(chave: chave, segredo: segredo)
+    }
+
+    static func apagar() {
+        let busca: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: servico]
+        SecItemDelete(busca as CFDictionary)
+    }
+}
