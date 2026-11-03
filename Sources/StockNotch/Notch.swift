@@ -147,9 +147,9 @@ struct NotchView: View {
             if !expandido { withAnimation(animacao) { expandido = true } }
         }
         .contextMenu {
-            Button("Abrir painel…", action: abrirPainel)
+            Button(tr("Abrir painel…", "Open StockNotch…"), action: abrirPainel)
             Divider()
-            Button("Sair do StockNotch") { NSApp.terminate(nil) }
+            Button(tr("Sair do StockNotch", "Quit StockNotch")) { NSApp.terminate(nil) }
         }
         .fixedSize()
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: aoMudarTamanho)
@@ -214,7 +214,7 @@ struct NotchView: View {
                 if let atual, let c = atual.cotacao {
                     HStack(spacing: 3) {
                         Seta(valor: c.variacao)
-                        Text(abs(c.variacao).formatted(.percent.precision(.fractionLength(2))))
+                        Text(pct(abs(c.variacao), sinal: false))
                     }
                     .font(.system(size: 12, weight: .semibold))
                     .monospacedDigit()
@@ -230,12 +230,12 @@ struct NotchView: View {
         .foregroundStyle(.white)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(atualAcessivel)
-        .accessibilityHint("Passe o mouse ou clique para ver a carteira")
+        .accessibilityHint(tr("Passe o mouse ou clique para ver a carteira", "Hover or click to see your portfolio"))
     }
 
     private var atualAcessivel: String {
         guard let atual = destaque, let c = atual.cotacao else { return "StockNotch" }
-        return "\(atual.ativo.simbolo), \(pct(c.variacao)) hoje"
+        return tr("\(atual.ativo.simbolo), \(pct(c.variacao)) hoje", "\(atual.ativo.simbolo), \(pct(c.variacao)) today")
     }
 
     // MARK: Aberto: patrimônio e lista
@@ -255,8 +255,8 @@ struct NotchView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help("Abrir painel")
-                .accessibilityLabel("Abrir painel")
+                .help(tr("Abrir painel", "Open StockNotch"))
+                .accessibilityLabel(tr("Abrir painel", "Open StockNotch"))
             }
             .frame(height: geometria.altura)
 
@@ -276,23 +276,24 @@ struct NotchView: View {
 
     private var vazio: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Nenhum ativo ainda")
+            Text(tr("Nenhum ativo ainda", "No assets yet"))
                 .font(.system(size: 15, weight: .semibold))
-            Text("Adicione ações e criptomoedas ou conecte sua conta da Binance.")
+            Text(tr("Adicione ações e criptomoedas ou conecte sua conta da Binance.", "Add stocks and crypto or connect your Binance account."))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-            Button("Abrir painel", action: abrirPainel)
+            Button(tr("Abrir painel", "Open StockNotch"), action: abrirPainel)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .padding(.top, 4)
         }
     }
 
-    private var resumo: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(carteira.totais, id: \.moeda) { total in
+    // Um total só, na moeda escolhida. Sem câmbio para alguma posição, avisa em vez de somar errado.
+    @ViewBuilder private var resumo: some View {
+        if let total = carteira.total {
+            if total.patrimonio > 0 {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Patrimônio em \(total.moeda)")
+                    Text(tr("Patrimônio", "Portfolio value"))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                     Text(dinheiro(total.patrimonio, total.moeda))
@@ -300,13 +301,22 @@ struct NotchView: View {
                         .monospacedDigit()
                         .contentTransition(.numericText())
                     HStack(spacing: 14) {
-                        Indicador(rotulo: "Hoje", resultado: Resultado(lucro: total.hoje, percentual: total.hojePct), moeda: total.moeda)
+                        Indicador(rotulo: tr("Hoje", "Today"), resultado: Resultado(lucro: total.hoje, percentual: total.hojePct), moeda: total.moeda)
                         if total.custo > 0 {
-                            Indicador(rotulo: "Resultado", resultado: total.lucro, moeda: total.moeda)
+                            Indicador(rotulo: tr("Resultado", "Return"), resultado: total.lucro, moeda: total.moeda)
                         }
                     }
                 }
             }
+        } else {
+            let moedas = carteira.semCambio.joined(separator: ", ")
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(tr("Total indisponível: falta o câmbio de \(moedas) para \(carteira.moeda).",
+                        "Total unavailable: no exchange rate from \(moedas) to \(carteira.moeda)."))
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -325,7 +335,7 @@ struct NotchView: View {
                 ForEach(binance) { LinhaNotch(linha: $0, falhou: false) }
             }
             if ocultos > 0 {
-                Button("Mais \(ocultos) no painel", action: abrirPainel)
+                Button(tr("Mais \(ocultos) no painel", "\(ocultos) more in StockNotch"), action: abrirPainel)
                     .buttonStyle(.plain)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -334,16 +344,20 @@ struct NotchView: View {
     }
 
     @ViewBuilder private var rodape: some View {
-        let aviso = carteira.erroArquivo
-            ?? carteira.erroBinance.map { "Binance: \($0)" }
-            ?? (carteira.simbolosSemCotacao.isEmpty ? nil : "Sem cotação: \(carteira.simbolosSemCotacao.joined(separator: ", "))")
+        let semCotacao = carteira.simbolosSemCotacao.joined(separator: ", ")
+        let aviso = carteira.erroArquivo.map { mensagem($0) }
+            ?? carteira.erroBinance.map { "Binance: \(mensagem($0))" }
+            ?? (semCotacao.isEmpty ? nil : tr("Sem cotação: \(semCotacao)", "No quote: \(semCotacao)"))
+            ?? carteira.cambioVelho.map { tr("Câmbio sem atualizar desde \(quando($0, hora: .shortened))",
+                                             "Exchange rate not updated since \(quando($0, hora: .shortened))") }
         HStack(spacing: 6) {
             if let aviso {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Text(aviso).lineLimit(2)
             } else if let hora = carteira.atualizadoEm {
                 Image(systemName: "arrow.clockwise")
-                Text("Atualizado às \(hora.formatted(date: .omitted, time: .standard)) · B3 com 15 min de atraso")
+                Text(tr("Atualizado às \(quando(hora, hora: .standard)) · B3 com 15 min de atraso",
+                        "Updated at \(quando(hora, hora: .standard)) · B3 delayed 15 min"))
             }
         }
         .font(.system(size: 10.5))
@@ -368,6 +382,7 @@ struct Indicador: View {
 }
 
 struct LinhaNotch: View {
+    @Environment(Carteira.self) private var carteira
     let linha: Linha
     let falhou: Bool
 
@@ -376,7 +391,7 @@ struct LinhaNotch: View {
             Monograma(ativo: linha.ativo)
             VStack(alignment: .leading, spacing: 1) {
                 Text(linha.ativo.simbolo).font(.system(size: 13, weight: .semibold))
-                Text(linha.quantidade > 0 ? "\(qtd(linha.quantidade)) un." : "acompanhando")
+                Text(linha.quantidade > 0 ? tr("\(qtd(linha.quantidade)) un.", "Qty \(qtd(linha.quantidade))") : tr("acompanhando", "watching"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -386,11 +401,13 @@ struct LinhaNotch: View {
                     Text(dinheiro(c.preco, c.moeda))
                         .font(.system(size: 13, weight: .medium))
                         .contentTransition(.numericText())
-                    if let custo = linha.custo, linha.quantidade > 0 {
-                        TextoResultado(resultado: resultado(custo: custo, valor: linha.quantidade * c.preco), moeda: c.moeda)
+                    // Preço na moeda do ativo; resultado e valor da posição na moeda escolhida.
+                    if let lucro = carteira.lucro(linha) {
+                        TextoResultado(resultado: lucro.resultado, moeda: lucro.moeda)
                             .font(.system(size: 11))
                     } else if linha.custo == nil {
-                        Text(dinheiro(linha.quantidade * c.preco, c.moeda))
+                        let valor = carteira.convertido(linha.quantidade * c.preco, de: c.moeda)
+                        Text(dinheiro(valor.valor, valor.moeda))
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
@@ -399,7 +416,7 @@ struct LinhaNotch: View {
                 Pilula(fracao: c.variacao)
                     .frame(width: 74, alignment: .trailing)
             } else if falhou {
-                Text("sem cotação").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(tr("sem cotação", "no quote")).font(.system(size: 11)).foregroundStyle(.secondary)
             } else {
                 ProgressView().controlSize(.small)
             }

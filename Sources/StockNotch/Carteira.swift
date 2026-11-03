@@ -23,6 +23,9 @@ struct Ativo: Codable, Identifiable {
         return b3 ? simbolo + ".SA" : simbolo
     }
 
+    // Moeda até a primeira cotação chegar (depois vale a do Yahoo): B3 e cripto em reais, o resto em dólar.
+    var moedaPrevista: String { cripto || simboloYahoo.hasSuffix(".SA") ? "BRL" : "USD" }
+
     static func normalizar(_ texto: String, cripto: Bool) -> String {
         let s = texto.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber || (!cripto && ".-^".contains($0))) }
         // "BTCBRL" vira "BTC": o par em reais é montado na busca da cotação.
@@ -53,6 +56,7 @@ struct Linha: Identifiable {
     let cotacao: Cotacao?
     var id: String { (custo == nil ? "binance:" : "") + ativo.id }
     var valor: Double? { cotacao.map { $0.preco * quantidade } }
+    var moeda: String { cotacao?.moeda ?? ativo.moedaPrevista }
 }
 
 struct Total {
@@ -66,45 +70,79 @@ struct Total {
     var lucro: Resultado { resultado(custo: custo, valor: valorComCusto) }
 }
 
-// Um total por moeda: B3 e cripto em BRL, EUA em USD. Lucro só conta o que tem compra registrada.
-func somar(_ linhas: [Linha]) -> [Total] {
-    var totais: [String: Total] = [:]
+// Quantos reais vale 1 unidade de cada moeda (o real é o pivô), ex.: ["USD": 5.4, "EUR": 6.2].
+typealias Cambio = [String: Double]
+
+// Converte passando pelo real. nil se faltar o câmbio de uma das moedas: melhor nada do que um número errado.
+func converter(_ valor: Double, de origem: String, para destino: String, cambio: Cambio) -> Double? {
+    if origem == destino { return valor }
+    let reais = { (moeda: String) in moeda == "BRL" ? 1 : cambio[moeda] }
+    guard let a = reais(origem), let b = reais(destino), a > 0, b > 0 else { return nil }
+    return valor * a / b
+}
+
+// Um total só, na moeda escolhida. Lucro só conta o que tem compra registrada.
+// nil quando falta câmbio para alguma posição: um total sem ela estaria errado.
+func somar(_ linhas: [Linha], em moeda: String, cambio: Cambio) -> Total? {
+    var t = Total(moeda: moeda)
     for linha in linhas where linha.quantidade > 0 {
         guard let c = linha.cotacao else { continue }
-        let valor = linha.quantidade * c.preco
-        var t = totais[c.moeda] ?? Total(moeda: c.moeda)
+        guard let valor = converter(linha.quantidade * c.preco, de: c.moeda, para: moeda, cambio: cambio),
+              let custo = converter(linha.custo ?? 0, de: c.moeda, para: moeda, cambio: cambio)
+        else { return nil }
         t.patrimonio += valor
         t.hoje += valor - valor / (1 + c.variacao)
-        if let custo = linha.custo {
+        if linha.custo != nil {
             t.custo += custo
             t.valorComCusto += valor
         }
-        totais[c.moeda] = t
     }
-    return totais.values.sorted { $0.moeda < $1.moeda }
+    return t
 }
 
-// Aceita "1.234,56", "0,5" e "0.5".
-func numero(_ texto: String) -> Double? {
+// Cotações e câmbio buscados no mesmo ciclo e publicados de uma vez, para todas as telas baterem entre si.
+// Quem falhou no ciclo mantém o último valor bom, para não piscar.
+struct Snapshot {
+    var cotacoes: [String: Cotacao] = [:]
+    var cambio: Cambio = [:]
+    var cambioEm: [String: Date] = [:]
+    var falhas: Set<String> = []
+    var em: Date?
+
+    // Câmbio guardado de ciclos anteriores porque o Yahoo falhou: passado de 5 min, a tela avisa desde quando.
+    func cambioVelho(_ moedas: Set<String>) -> Date? {
+        guard let em, let antigo = moedas.compactMap({ cambioEm[$0] }).min(), em.timeIntervalSince(antigo) > 300 else { return nil }
+        return antigo
+    }
+}
+
+// Em português aceita "1.234,56", "0,5" e "0.5"; em inglês a vírgula separa milhar: "1,234.56".
+func numero(_ texto: String, idioma: Idioma = .pt) -> Double? {
     let t = texto.trimmingCharacters(in: .whitespaces)
+    if idioma == .en {
+        // "32,50" ou "0,5" é vírgula decimal: nil para o form avisar, em vez de gravar 3250 ou 5.
+        guard !t.contains(",") || t.wholeMatch(of: #/\d{1,3}(,\d{3})*(\.\d+)?/#) != nil else { return nil }
+        return Double(t.replacingOccurrences(of: ",", with: ""))
+    }
     return Double(t.contains(",") ? t.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".") : t)
 }
 
 @MainActor @Observable
 final class Carteira {
     private(set) var ativos: [Ativo] = []
-    private(set) var cotacoes: [String: Cotacao] = [:]
-    private(set) var falhas: Set<String> = []
-    private(set) var erroArquivo: String?
-    private(set) var atualizadoEm: Date?
+    private(set) var snapshot = Snapshot()
+    private(set) var erroArquivo: Falha?
     private(set) var saldosBinance: [String: Double] = [:]
-    private(set) var erroBinance: String?
+    private(set) var erroBinance: (any Error)?
     private var credencial: Credencial? = Chaveiro.ler()
 
     // JSON legível, dá pra fazer backup ou editar à mão
     let arquivo = URL.applicationSupportDirectory.appending(path: "StockNotch/carteira.json")
 
     var binanceConectada: Bool { credencial != nil }
+    var cotacoes: [String: Cotacao] { snapshot.cotacoes }
+    var falhas: Set<String> { snapshot.falhas }
+    var atualizadoEm: Date? { snapshot.em }
 
     var linhas: [Linha] {
         ativos.map { Linha(ativo: $0, quantidade: $0.quantidade, custo: $0.custo, cotacao: cotacoes[$0.id]) }
@@ -120,7 +158,39 @@ final class Carteira {
             .sorted { ($0.valor ?? 0) > ($1.valor ?? 0) }
     }
 
-    var totais: [Total] { somar(linhas + linhasBinance) }
+    // Preço fica na moeda do ativo; valor, resultado e totais vão para a moeda escolhida nos Ajustes.
+    var moeda: String { Ajustes.atual.moeda.rawValue }
+
+    var total: Total? { somar(linhas + linhasBinance, em: moeda, cambio: snapshot.cambio) }
+
+    // Moedas de posições que não dá para converter agora; com alguma, o total fica indisponível.
+    var semCambio: [String] {
+        moedasConvertidas.filter { converter(1, de: $0, para: moeda, cambio: snapshot.cambio) == nil }.sorted()
+    }
+
+    // Horário do câmbio mais antigo em uso, quando ficou para trás das cotações.
+    var cambioVelho: Date? {
+        let usadas = moedasConvertidas.isEmpty ? [] : moedasConvertidas.union([moeda]).subtracting(["BRL"])
+        return snapshot.cambioVelho(usadas)
+    }
+
+    // Moedas das posições com cotação que precisam de câmbio para a moeda escolhida.
+    private var moedasConvertidas: Set<String> {
+        Set((linhas + linhasBinance).filter { $0.quantidade > 0 }.compactMap { $0.cotacao?.moeda }).subtracting([moeda])
+    }
+
+    // Sem câmbio, o valor fica na moeda do ativo (e com o símbolo dela): nunca convertido errado.
+    func convertido(_ valor: Double, de origem: String) -> (valor: Double, moeda: String) {
+        converter(valor, de: origem, para: moeda, cambio: snapshot.cambio).map { ($0, moeda) } ?? (valor, origem)
+    }
+
+    // O percentual não muda com o câmbio, só o valor do lucro.
+    func lucro(_ linha: Linha) -> (resultado: Resultado, moeda: String)? {
+        guard let c = linha.cotacao, let custo = linha.custo, linha.quantidade > 0 else { return nil }
+        let r = resultado(custo: custo, valor: linha.quantidade * c.preco)
+        let lucro = convertido(r.lucro, de: c.moeda)
+        return (Resultado(lucro: lucro.valor, percentual: r.percentual), lucro.moeda)
+    }
 
     var simbolosSemCotacao: [String] { ativos.filter { falhas.contains($0.id) }.map(\.simbolo) }
 
@@ -132,7 +202,8 @@ final class Carteira {
             ativos = try decoder.decode([Ativo].self, from: data)
         } catch {
             // Não sobrescreve um arquivo que não conseguiu ler.
-            erroArquivo = "Não consegui ler \(arquivo.path). Nada será salvo até corrigir."
+            erroArquivo = Falha("Não consegui ler \(arquivo.path). Nada será salvo até corrigir.",
+                                "Couldn't read \(arquivo.path). Nothing will be saved until it's fixed.")
         }
     }
 
@@ -149,7 +220,7 @@ final class Carteira {
 
     func remover(_ ativo: Ativo) {
         ativos.removeAll { $0.id == ativo.id }
-        cotacoes[ativo.id] = nil
+        snapshot.cotacoes[ativo.id] = nil
         salvar()
     }
 
@@ -164,7 +235,8 @@ final class Carteira {
                               segredo: segredo.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !cred.chave.isEmpty, !cred.segredo.isEmpty,
               (cred.chave + cred.segredo).allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) })
-        else { throw Falha("Cole a API Key e a Secret Key exatamente como a Binance mostrou.") }
+        else { throw Falha("Cole a API Key e a Secret Key exatamente como a Binance mostrou.",
+                           "Paste the API Key and Secret Key exactly as Binance shows them.") }
         try await Binance.verificar(cred)
         try Chaveiro.salvar(cred)
         credencial = cred
@@ -185,23 +257,30 @@ final class Carteira {
                 if self.credencial != nil { saldosBinance = saldos }
                 erroBinance = nil
             } catch {
-                erroBinance = error.localizedDescription
+                erroBinance = error
             }
         }
         var lista = ativos
         for moeda in saldosBinance.keys where !lista.contains(where: { $0.id == "c:" + moeda }) {
             lista.append(Ativo(simbolo: moeda, cripto: true))
         }
+        async let cambio = Fonte.cambio()
         let resultados = await withTaskGroup(of: (String, Cotacao?).self) { grupo in
             for ativo in lista { grupo.addTask { (ativo.id, try? await Fonte.cotacao(ativo)) } }
             var r: [(String, Cotacao?)] = []
             for await item in grupo { r.append(item) }
             return r
         }
-        for (id, cotacao) in resultados where cotacao != nil { cotacoes[id] = cotacao }
+        let novoCambio = await cambio
+        // Monta depois do último await, sobre o snapshot mais recente, e troca de uma vez.
+        var novo = snapshot
+        for (id, cotacao) in resultados { if let cotacao { novo.cotacoes[id] = cotacao } }
+        novo.cambio.merge(novoCambio) { $1 }
+        for moeda in novoCambio.keys { novo.cambioEm[moeda] = .now }
         // Só avisa dos ativos manuais; moeda da Binance sem cotação só some da lista.
-        falhas = Set(resultados.filter { $0.1 == nil }.map(\.0)).intersection(ativos.map(\.id))
-        atualizadoEm = .now
+        novo.falhas = Set(resultados.filter { $0.1 == nil }.map(\.0)).intersection(ativos.map(\.id))
+        novo.em = .now
+        snapshot = novo
     }
 
     private func salvar() {
@@ -213,19 +292,33 @@ final class Carteira {
             try FileManager.default.createDirectory(at: arquivo.deletingLastPathComponent(), withIntermediateDirectories: true)
             try encoder.encode(ativos).write(to: arquivo, options: .atomic)
         } catch {
-            erroArquivo = "Erro ao salvar: \(error.localizedDescription)"
+            // Só o código do erro: o texto do sistema viria no idioma em que o app abriu.
+            let codigo = (error as NSError).code
+            erroArquivo = Falha("Não consegui salvar \(arquivo.path) (erro \(codigo)).", "Couldn't save \(arquivo.path) (error \(codigo)).")
         }
     }
 }
 
-struct Falha: LocalizedError {
-    let errorDescription: String?
-    init(_ mensagem: String) { errorDescription = mensagem }
+// Texto nos dois idiomas; mensagem(_:) escolhe na hora de mostrar.
+struct Falha: Error {
+    let pt: String
+    let en: String
+    init(_ pt: String, _ en: String) {
+        self.pt = pt
+        self.en = en
+    }
 }
 
 enum Fonte {
     static func cotacao(_ ativo: Ativo) async throws -> Cotacao {
         ativo.cripto ? try await cripto(ativo.simbolo) : try await yahoo(ativo.simboloYahoo)
+    }
+
+    // Câmbio do dólar e do euro em reais, do mesmo endpoint das ações. O que falhar fica de fora.
+    static func cambio() async -> Cambio {
+        async let usd = try? yahoo("USDBRL=X")
+        async let eur = try? yahoo("EURBRL=X")
+        return ["USD": await usd?.preco, "EUR": await eur?.preco].compactMapValues { $0 }
     }
 
     // API pública não oficial do Yahoo, sem chave: B3 vem com ~15 min de atraso (tempo real da B3 só pago)
@@ -281,10 +374,28 @@ func baixar<T: Decodable>(_ pedido: URLRequest) async throws -> T {
     req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")  // o Yahoo responde 429 para alguns User-Agents
     let (data, resposta) = try await URLSession.shared.data(for: req)
     guard (resposta as? HTTPURLResponse)?.statusCode == 200 else {
-        throw Falha((try? JSONDecoder().decode(ErroServico.self, from: data))?.msg ?? "O serviço de cotações respondeu com erro.")
+        if let erro = try? JSONDecoder().decode(ErroServico.self, from: data) { throw erro.falha }
+        throw Falha("O serviço de cotações respondeu com erro.", "The quote service returned an error.")
     }
     return try JSONDecoder().decode(T.self, from: data)
 }
 
-// A Binance explica a recusa em {"msg": "..."}.
-private struct ErroServico: Decodable { let msg: String }
+// A Binance explica a recusa em {"code": -2015, "msg": "..."}, só em inglês: os casos comuns ganham texto nos dois idiomas.
+struct ErroServico: Decodable {
+    let code: Int?
+    let msg: String
+
+    var falha: Falha {
+        switch code {
+        case -2008, -2014, -2015:
+            Falha("Chave recusada: confira a API Key, a Secret Key e as restrições de IP.",
+                  "Key refused: check the API Key, the Secret Key and the IP restrictions.")
+        case -1022:
+            Falha("Assinatura recusada: confira a Secret Key.", "Signature refused: check the Secret Key.")
+        case -1003:
+            Falha("Pedidos demais; tente de novo em alguns minutos.", "Too many requests; try again in a few minutes.")
+        default:
+            Falha("Pedido recusado: \(msg)", "Request refused: \(msg)")
+        }
+    }
+}

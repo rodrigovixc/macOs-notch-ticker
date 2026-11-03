@@ -22,9 +22,10 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSUIElement</key><true/>
-    <!-- App em português: datas e textos do sistema (menus, botões) saem em pt-BR. -->
+    <!-- Português ou inglês, escolhido nos Ajustes: o app grava AppleLanguages e os menus do sistema
+         seguem no próximo início. Sem as duas línguas aqui, o macOS ignoraria a escolha. -->
     <key>CFBundleDevelopmentRegion</key><string>pt-BR</string>
-    <key>CFBundleLocalizations</key><array><string>pt-BR</string></array>
+    <key>CFBundleLocalizations</key><array><string>pt-BR</string><string>en</string></array>
 </dict>
 </plist>
 EOF

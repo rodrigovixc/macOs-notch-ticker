@@ -24,7 +24,8 @@ enum Binance {
         let perigosas = [r.enableWithdrawals, r.enableInternalTransfer, r.permitsUniversalTransfer,
                          r.enableSpotAndMarginTrading, r.enableMargin, r.enableFutures]
         guard r.enableReading, !perigosas.contains(true) else {
-            throw Falha("Use uma chave só de leitura: na Binance, deixe marcado apenas “Ativar leitura”.")
+            throw Falha("Use uma chave só de leitura: na Binance, deixe marcado apenas “Ativar leitura”.",
+                        "Use a read-only key: on Binance, leave only “Enable Reading” checked.")
         }
     }
 
@@ -77,7 +78,9 @@ enum Chaveiro {
             kSecValueData as String: Data(cred.segredo.utf8),
         ]
         let status = SecItemAdd(item as CFDictionary, nil)
-        guard status == errSecSuccess else { throw Falha("Não consegui guardar a chave no Keychain (erro \(status)).") }
+        guard status == errSecSuccess else {
+            throw Falha("Não consegui guardar a chave no Keychain (erro \(status)).", "Couldn't save the key to the Keychain (error \(status)).")
+        }
     }
 
     static func ler() -> Credencial? {

@@ -1,11 +1,25 @@
 import SwiftUI
 
 struct PainelView: View {
-    enum Secao: String, CaseIterable, Identifiable {
-        case carteira = "Carteira"
-        case binance = "Binance"
+    enum Secao: CaseIterable, Identifiable {
+        case carteira, binance, ajustes
         var id: Self { self }
-        var icone: String { self == .carteira ? "briefcase" : "link" }
+
+        var icone: String {
+            switch self {
+            case .carteira: "briefcase"
+            case .binance: "link"
+            case .ajustes: "gearshape"
+            }
+        }
+
+        @MainActor var nome: String {
+            switch self {
+            case .carteira: tr("Carteira", "Portfolio")
+            case .binance: "Binance"
+            case .ajustes: tr("Ajustes", "Settings")
+            }
+        }
     }
 
     @State private var secao: Secao? = .carteira
@@ -13,12 +27,12 @@ struct PainelView: View {
     var body: some View {
         NavigationSplitView {
             List(Secao.allCases, selection: $secao) { s in
-                Label(s.rawValue, systemImage: s.icone).tag(s)
+                Label(s.nome, systemImage: s.icone).tag(s)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190)
             .safeAreaInset(edge: .bottom) {
                 Button { NSApp.terminate(nil) } label: {
-                    Label("Sair do StockNotch", systemImage: "power")
+                    Label(tr("Sair do StockNotch", "Quit StockNotch"), systemImage: "power")
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
@@ -29,9 +43,12 @@ struct PainelView: View {
             switch secao ?? .carteira {
             case .carteira: CarteiraTela()
             case .binance: BinanceTela()
+            case .ajustes: AjustesTela()
             }
         }
         .frame(minWidth: 880, minHeight: 480)
+        // Controles nativos (DatePicker etc.) seguem o idioma do app, não o do sistema.
+        .environment(\.locale, Ajustes.atual.idioma.locale)
     }
 }
 
@@ -49,81 +66,95 @@ struct CarteiraTela: View {
         Group {
             if carteira.ativos.isEmpty {
                 ContentUnavailableView {
-                    Label("Nenhum ativo", systemImage: "chart.line.uptrend.xyaxis")
+                    Label(tr("Nenhum ativo", "No assets"), systemImage: "chart.line.uptrend.xyaxis")
                 } description: {
-                    Text("Adicione ações da B3, dos EUA ou criptomoedas para acompanhar no notch.")
+                    Text(tr("Adicione ações da B3, dos EUA ou criptomoedas para acompanhar no notch.",
+                            "Add B3 or US stocks or crypto to follow them in the notch."))
                 } actions: {
-                    Button("Adicionar ativo") { adicionando = true }
+                    Button(tr("Adicionar ativo", "Add Asset")) { adicionando = true }
                         .buttonStyle(.borderedProminent)
                 }
             } else {
                 tabela
             }
         }
-        .navigationTitle("Carteira")
+        .navigationTitle(tr("Carteira", "Portfolio"))
         .toolbar {
             ToolbarItem {
-                Button { adicionando = true } label: { Label("Adicionar ativo", systemImage: "plus") }
-                    .help("Adicionar ação ou cripto")
+                Button { adicionando = true } label: { Label(tr("Adicionar ativo", "Add Asset"), systemImage: "plus") }
+                    .help(tr("Adicionar ação ou cripto", "Add a stock or crypto"))
             }
             ToolbarItem {
-                Button { vendoCompras = selecionado } label: { Label("Compras", systemImage: "list.bullet.rectangle") }
-                    .help("Ver compras do ativo selecionado (ou dê dois cliques na linha)")
+                Button { vendoCompras = selecionado } label: { Label(tr("Compras", "Purchases"), systemImage: "list.bullet.rectangle") }
+                    .help(tr("Ver compras do ativo selecionado (ou dê dois cliques na linha)",
+                             "See the selected asset's purchases (or double-click the row)"))
                     .disabled(selecionado == nil)
             }
         }
         .sheet(isPresented: $adicionando) { FormAdicionar(fixo: nil).environment(carteira) }
         .sheet(item: $comprando) { FormAdicionar(fixo: $0).environment(carteira) }
         .sheet(item: $vendoCompras) { ComprasFolha(id: $0.id).environment(carteira) }
-        .confirmationDialog("Remover \(removendo?.simbolo ?? "")?",
+        .confirmationDialog(tr("Remover \(removendo?.simbolo ?? "")?", "Remove \(removendo?.simbolo ?? "")?"),
                             isPresented: .init(get: { removendo != nil }, set: { if !$0 { removendo = nil } }),
                             presenting: removendo) { ativo in
-            Button("Remover", role: .destructive) { carteira.remover(ativo) }
+            Button(tr("Remover", "Remove"), role: .destructive) { carteira.remover(ativo) }
         } message: { ativo in
-            Text("O histórico de \(ativo.compras.count) compra(s) será apagado.")
+            Text(tr("O histórico de \(ativo.compras.count) compra(s) será apagado.",
+                    "The history of \(ativo.compras.count) purchase(s) will be deleted."))
         }
     }
 
     private var tabela: some View {
         Table(carteira.linhas, selection: $selecao) {
-            TableColumn("Ativo") { l in
+            TableColumn(tr("Ativo", "Asset")) { l in
                 HStack(spacing: 8) {
                     Monograma(ativo: l.ativo, tamanho: 22)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(l.ativo.simbolo).fontWeight(.semibold)
-                        Text(l.ativo.cripto ? "Cripto" : "Ação").font(.caption).foregroundStyle(.secondary)
+                        Text(l.ativo.cripto ? tr("Cripto", "Crypto") : tr("Ação", "Stock")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .padding(.vertical, 2)
             }
             .width(min: 100, ideal: 120)
-            TableColumn("Quantidade") { l in
+            TableColumn(tr("Quantidade", "Quantity")) { l in
                 Text(l.quantidade > 0 ? qtd(l.quantidade) : "—")
             }
             .width(min: 60, ideal: 70)
             .alignment(.trailing)
-            TableColumn("Preço médio") { l in
-                Text(l.quantidade > 0 ? dinheiro((l.custo ?? 0) / l.quantidade, l.cotacao?.moeda ?? "BRL") : "—")
+            // Preço médio e cotação na moeda do ativo; valor e resultado na moeda escolhida.
+            TableColumn(tr("Preço médio", "Avg. Price")) { l in
+                Text(l.quantidade > 0 ? dinheiro((l.custo ?? 0) / l.quantidade, l.moeda) : "—")
             }
             .width(min: 80, ideal: 100)
             .alignment(.trailing)
-            TableColumn("Cotação") { l in
+            TableColumn(tr("Cotação", "Price")) { l in
                 if let c = l.cotacao {
                     Text(dinheiro(c.preco, c.moeda))
                 } else {
-                    Text(carteira.falhas.contains(l.ativo.id) ? "sem cotação" : "…").foregroundStyle(.secondary)
+                    Text(carteira.falhas.contains(l.ativo.id) ? tr("sem cotação", "no quote") : "…").foregroundStyle(.secondary)
                 }
             }
             .width(min: 80, ideal: 110)
             .alignment(.trailing)
-            TableColumn("Dia") { l in
+            TableColumn(tr("Dia", "Day")) { l in
                 if let c = l.cotacao { Pilula(fracao: c.variacao) }
             }
             .width(min: 70, ideal: 80)
             .alignment(.trailing)
-            TableColumn("Resultado") { l in
-                if let c = l.cotacao, let custo = l.custo, l.quantidade > 0 {
-                    TextoResultado(resultado: resultado(custo: custo, valor: l.quantidade * c.preco), moeda: c.moeda)
+            TableColumn(tr("Valor", "Value")) { l in
+                if let c = l.cotacao, l.quantidade > 0 {
+                    let valor = carteira.convertido(l.quantidade * c.preco, de: c.moeda)
+                    Text(dinheiro(valor.valor, valor.moeda))
+                } else {
+                    Text("—").foregroundStyle(.secondary)
+                }
+            }
+            .width(min: 80, ideal: 110)
+            .alignment(.trailing)
+            TableColumn(tr("Resultado", "Return")) { l in
+                if let lucro = carteira.lucro(l) {
+                    TextoResultado(resultado: lucro.resultado, moeda: lucro.moeda)
                 } else {
                     Text("—").foregroundStyle(.secondary)
                 }
@@ -134,10 +165,10 @@ struct CarteiraTela: View {
         .monospacedDigit()
         .contextMenu(forSelectionType: Ativo.ID.self) { ids in
             if let ativo = carteira.ativos.first(where: { $0.id == ids.first }) {
-                Button("Ver compras…") { vendoCompras = ativo }
-                Button("Registrar compra…") { comprando = ativo }
+                Button(tr("Ver compras…", "View Purchases…")) { vendoCompras = ativo }
+                Button(tr("Registrar compra…", "Record Purchase…")) { comprando = ativo }
                 Divider()
-                Button("Remover \(ativo.simbolo)", role: .destructive) {
+                Button(tr("Remover \(ativo.simbolo)", "Remove \(ativo.simbolo)"), role: .destructive) {
                     if ativo.compras.isEmpty { carteira.remover(ativo) } else { removendo = ativo }
                 }
             }
@@ -156,14 +187,14 @@ struct ComprasFolha: View {
     var body: some View {
         // Lê da carteira a cada mudança: apagar ou registrar atualiza a lista na hora.
         let ativo = carteira.ativos.first { $0.id == id }
-        let moeda = carteira.cotacoes[id]?.moeda ?? "BRL"
+        let moeda = carteira.cotacoes[id]?.moeda ?? ativo?.moedaPrevista ?? "BRL"
         let compras = ativo?.compras.sorted { $0.data > $1.data } ?? []
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 if let ativo { Monograma(ativo: ativo, tamanho: 30) }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(ativo?.simbolo ?? "").font(.title3.weight(.semibold))
-                    Text("Compras registradas").font(.caption).foregroundStyle(.secondary)
+                    Text(tr("Compras registradas", "Recorded purchases")).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -173,7 +204,7 @@ struct ComprasFolha: View {
             List(compras) { compra in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(compra.data.formatted(date: .abbreviated, time: .omitted))
+                        Text(quando(compra.data, data: .abbreviated))
                         Text("\(qtd(compra.quantidade)) × \(dinheiro(compra.preco, moeda))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -182,23 +213,25 @@ struct ComprasFolha: View {
                     Text(dinheiro(compra.quantidade * compra.preco, moeda)).monospacedDigit()
                     Button { if let ativo { carteira.remover(compra, de: ativo) } } label: { Image(systemName: "trash") }
                         .buttonStyle(.borderless)
-                        .help("Apagar esta compra")
-                        .accessibilityLabel("Apagar compra de \(compra.data.formatted(date: .numeric, time: .omitted))")
+                        .help(tr("Apagar esta compra", "Delete this purchase"))
+                        .accessibilityLabel(tr("Apagar compra de \(quando(compra.data, data: .numeric))",
+                                               "Delete purchase from \(quando(compra.data, data: .numeric))"))
                 }
                 .padding(.vertical, 2)
             }
             .overlay {
                 if compras.isEmpty {
-                    ContentUnavailableView("Sem compras", systemImage: "cart",
-                                           description: Text("Registre uma compra para ver o lucro ou prejuízo."))
+                    ContentUnavailableView(tr("Sem compras", "No Purchases"), systemImage: "cart",
+                                           description: Text(tr("Registre uma compra para ver o lucro ou prejuízo.",
+                                                                "Record a purchase to see your gain or loss.")))
                 }
             }
 
             HStack {
-                Button("Fechar") { dismiss() }
+                Button(tr("Fechar", "Close")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button { registrando = true } label: { Label("Registrar compra", systemImage: "plus") }
+                Button { registrando = true } label: { Label(tr("Registrar compra", "Record Purchase"), systemImage: "plus") }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(ativo == nil)
@@ -217,41 +250,43 @@ struct BinanceTela: View {
     @State private var chave = ""
     @State private var segredo = ""
     @State private var conectando = false
-    @State private var erro: String?
+    @State private var erro: (any Error)?
 
     var body: some View {
         Form {
             Section {
-                LabeledContent("Status") {
+                LabeledContent(tr("Status", "Status")) {
                     if carteira.binanceConectada {
-                        Label("Conectada", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        Label(tr("Conectada", "Connected"), systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     } else {
-                        Label("Não conectada", systemImage: "circle.dashed").foregroundStyle(.secondary)
+                        Label(tr("Não conectada", "Not connected"), systemImage: "circle.dashed").foregroundStyle(.secondary)
                     }
                 }
                 if carteira.binanceConectada {
-                    Button("Desconectar", role: .destructive) { carteira.desconectarBinance() }
+                    Button(tr("Desconectar", "Disconnect"), role: .destructive) { carteira.desconectarBinance() }
                 } else {
-                    TextField("API Key", text: $chave, prompt: Text("Cole a API Key"))
-                    SecureField("Secret Key", text: $segredo, prompt: Text("Cole a Secret Key"))
+                    TextField("API Key", text: $chave, prompt: Text(tr("Cole a API Key", "Paste the API Key")))
+                    SecureField("Secret Key", text: $segredo, prompt: Text(tr("Cole a Secret Key", "Paste the Secret Key")))
                     HStack {
                         Spacer()
                         if conectando { ProgressView().controlSize(.small) }
-                        Button("Conectar") { Task { await conectar() } }
+                        Button(tr("Conectar", "Connect")) { Task { await conectar() } }
                             .buttonStyle(.borderedProminent)
                             .disabled(chave.isEmpty || segredo.isEmpty || conectando)
                     }
                 }
                 if let aviso = erro ?? carteira.erroBinance {
-                    Label(aviso, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    Label(mensagem(aviso), systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
                 }
             } header: {
-                Text("Conta")
+                Text(tr("Conta", "Account"))
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Na Binance, crie uma chave de API deixando marcado só “Ativar leitura”. O app recusa chaves que podem negociar, transferir ou sacar, e guarda a Secret Key nas Chaves do macOS (Keychain).")
-                    Link("Abrir o gerenciamento de API da Binance",
-                         destination: URL(string: "https://www.binance.com/pt-BR/my/settings/api-management")!)
+                    Text(tr("Na Binance, crie uma chave de API deixando marcado só “Ativar leitura”. O app recusa chaves que podem negociar, transferir ou sacar, e guarda a Secret Key nas Chaves do macOS (Keychain).",
+                            "On Binance, create an API key with only “Enable Reading” checked. The app refuses keys that can trade, transfer or withdraw, and stores the Secret Key in the macOS Keychain."))
+                    Link(tr("Abrir o gerenciamento de API da Binance", "Open Binance API Management"),
+                         destination: URL(string: tr("https://www.binance.com/pt-BR/my/settings/api-management",
+                                                     "https://www.binance.com/en/my/settings/api-management"))!)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -260,9 +295,10 @@ struct BinanceTela: View {
             }
 
             if carteira.binanceConectada {
-                Section("Saldos (spot e Simple Earn flexível)") {
+                Section(tr("Saldos (spot e Simple Earn flexível)", "Balances (spot and Simple Earn Flexible)")) {
                     if carteira.linhasBinance.isEmpty {
-                        Text(carteira.atualizadoEm == nil ? "Carregando…" : "Nenhum saldo acima de R$ 1.")
+                        Text(carteira.atualizadoEm == nil ? tr("Carregando…", "Loading…")
+                             : tr("Nenhum saldo acima de \(dinheiro(1, "BRL")).", "No balances above \(dinheiro(1, "BRL"))."))
                             .foregroundStyle(.secondary)
                     }
                     ForEach(carteira.linhasBinance) { l in
@@ -272,7 +308,8 @@ struct BinanceTela: View {
                             Spacer()
                             Text(qtd(l.quantidade)).foregroundStyle(.secondary)
                             if let c = l.cotacao {
-                                Text(dinheiro(l.quantidade * c.preco, c.moeda)).frame(minWidth: 110, alignment: .trailing)
+                                let valor = carteira.convertido(l.quantidade * c.preco, de: c.moeda)
+                                Text(dinheiro(valor.valor, valor.moeda)).frame(minWidth: 110, alignment: .trailing)
                                 Pilula(fracao: c.variacao)
                             }
                         }
@@ -285,8 +322,8 @@ struct BinanceTela: View {
         .navigationTitle("Binance")
         .toolbar {
             ToolbarItem {
-                Button { Task { await carteira.atualizar() } } label: { Label("Atualizar", systemImage: "arrow.clockwise") }
-                    .help("Atualizar saldos e cotações agora")
+                Button { Task { await carteira.atualizar() } } label: { Label(tr("Atualizar", "Refresh"), systemImage: "arrow.clockwise") }
+                    .help(tr("Atualizar saldos e cotações agora", "Refresh balances and quotes now"))
             }
         }
     }
@@ -299,7 +336,7 @@ struct BinanceTela: View {
             chave = ""
             segredo = ""
         } catch {
-            erro = error.localizedDescription
+            erro = error
         }
         conectando = false
     }
@@ -320,7 +357,8 @@ struct FormAdicionar: View {
     private var codigo: String { fixo?.simbolo ?? Ativo.normalizar(simbolo, cripto: cripto) }
 
     private var compra: Compra? {
-        guard let q = numero(quantidade), let p = numero(preco), q > 0, p > 0 else { return nil }
+        let idioma = Ajustes.atual.idioma
+        guard let q = numero(quantidade, idioma: idioma), let p = numero(preco, idioma: idioma), q > 0, p > 0 else { return nil }
         return Compra(quantidade: q, preco: p, data: data)
     }
 
@@ -333,29 +371,32 @@ struct FormAdicionar: View {
         VStack(spacing: 0) {
             Form {
                 if let fixo {
-                    LabeledContent("Ativo", value: fixo.simbolo)
+                    LabeledContent(tr("Ativo", "Asset"), value: fixo.simbolo)
                 } else {
-                    Picker("Tipo", selection: $cripto) {
-                        Text("Ação").tag(false)
-                        Text("Cripto").tag(true)
+                    Picker(tr("Tipo", "Type"), selection: $cripto) {
+                        Text(tr("Ação", "Stock")).tag(false)
+                        Text(tr("Cripto", "Crypto")).tag(true)
                     }
                     .pickerStyle(.segmented)
-                    TextField("Código", text: $simbolo, prompt: Text(cripto ? "BTC, ETH, SOL" : "PETR4, VALE3, AAPL"))
+                    TextField(tr("Código", "Symbol"), text: $simbolo, prompt: Text(cripto ? "BTC, ETH, SOL" : "PETR4, VALE3, AAPL"))
                 }
                 Section {
-                    TextField("Quantidade", text: $quantidade, prompt: Text(ehCripto ? "0,05" : "100"))
-                    TextField("Preço por unidade", text: $preco, prompt: Text("32,50"))
-                    DatePicker("Data", selection: $data, in: ...Date.now, displayedComponents: .date)
+                    // Exemplos no formato do idioma, que é o que numero(_:idioma:) entende.
+                    TextField(tr("Quantidade", "Quantity"), text: $quantidade, prompt: Text(ehCripto ? tr("0,05", "0.05") : "100"))
+                    TextField(tr("Preço por unidade", "Price per unit"), text: $preco, prompt: Text(tr("32,50", "32.50")))
+                    DatePicker(tr("Data", "Date"), selection: $data, in: ...Date.now, displayedComponents: .date)
                     if !semCompra && compra == nil {
-                        Text("Preencha quantidade e preço com números maiores que zero.")
+                        Text(tr("Preencha quantidade e preço com números maiores que zero.",
+                                "Enter quantity and price as numbers greater than zero, with a period for decimals (32.50)."))
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
                 } header: {
-                    Text(fixo == nil ? "Compra (opcional)" : "Compra")
+                    Text(fixo == nil ? tr("Compra (opcional)", "Purchase (optional)") : tr("Compra", "Purchase"))
                 } footer: {
-                    Text(fixo == nil ? "Deixe em branco para só acompanhar a cotação. Preço em reais para B3 e cripto, em dólares para ações dos EUA."
-                                     : "Preço em reais para B3 e cripto, em dólares para ações dos EUA.")
+                    let moedas = tr("Preço em reais para B3 e cripto, em dólares para ações dos EUA.",
+                                    "Price in reais for B3 and crypto, in dollars for US stocks.")
+                    Text(fixo == nil ? tr("Deixe em branco para só acompanhar a cotação. ", "Leave blank to just follow the price. ") + moedas : moedas)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -363,9 +404,9 @@ struct FormAdicionar: View {
             .formStyle(.grouped)
             HStack {
                 Spacer()
-                Button("Cancelar", role: .cancel) { dismiss() }
+                Button(tr("Cancelar", "Cancel"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(fixo == nil ? "Adicionar" : "Registrar") {
+                Button(fixo == nil ? tr("Adicionar", "Add") : tr("Registrar", "Record")) {
                     carteira.adicionar(simbolo: codigo, cripto: ehCripto, compra: compra)
                     dismiss()
                 }
@@ -375,5 +416,31 @@ struct FormAdicionar: View {
             .padding()
         }
         .frame(width: 400)
+    }
+}
+
+struct AjustesTela: View {
+    var body: some View {
+        @Bindable var ajustes = Ajustes.atual
+        Form {
+            Section {
+                Picker(tr("Idioma", "Language"), selection: $ajustes.idioma) {
+                    ForEach(Idioma.allCases) { Text($0.nome).tag($0) }
+                }
+                Picker(tr("Moeda", "Currency"), selection: $ajustes.moeda) {
+                    ForEach(Moeda.allCases) { m in
+                        Text("\(ajustes.idioma.locale.localizedString(forCurrencyCode: m.rawValue) ?? m.rawValue) (\(m.rawValue))").tag(m)
+                    }
+                }
+            } footer: {
+                Text(tr("O preço de cada ativo fica na moeda dele (PETR4 em R$, AAPL em US$). Valor das posições, resultado e totais aparecem na moeda escolhida, pelo câmbio do Yahoo Finance. Os menus do sistema mudam de idioma na próxima vez que o app abrir.",
+                        "Each asset's price stays in its own currency (PETR4 in R$, AAPL in US$). Position value, return and totals are shown in the chosen currency, using Yahoo Finance exchange rates. System menus switch language the next time the app opens."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(tr("Ajustes", "Settings"))
     }
 }

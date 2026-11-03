@@ -58,20 +58,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 // MARK: - Formatação e peças visuais usadas no notch e no painel
 
-func dinheiro(_ valor: Double, _ moeda: String, sinal: Bool = false) -> String {
+// Formatadores no idioma escolhido (pt_BR: R$ 1.234,50; en_US: R$1,234.50).
+@MainActor func dinheiro(_ valor: Double, _ moeda: String, sinal: Bool = false, idioma: Idioma = Ajustes.atual.idioma) -> String {
     // Cripto barata (ex.: R$ 0,000123) precisa de mais casas.
-    var estilo = FloatingPointFormatStyle<Double>.Currency(code: moeda)
+    var estilo = FloatingPointFormatStyle<Double>.Currency(code: moeda, locale: idioma.locale)
         .precision(.fractionLength(valor.magnitude < 1 && valor != 0 ? 2...6 : 2...2))
     if sinal { estilo = estilo.sign(strategy: .always()) }
     return valor.formatted(estilo)
 }
 
-func pct(_ fracao: Double) -> String {
-    fracao.formatted(.percent.precision(.fractionLength(2)).sign(strategy: .always()))
+@MainActor func pct(_ fracao: Double, sinal: Bool = true, idioma: Idioma = Ajustes.atual.idioma) -> String {
+    var estilo = FloatingPointFormatStyle<Double>.Percent(locale: idioma.locale).precision(.fractionLength(2))
+    if sinal { estilo = estilo.sign(strategy: .always()) }
+    return fracao.formatted(estilo)
 }
 
-func qtd(_ valor: Double) -> String {
-    valor.formatted(.number.precision(.fractionLength(0...8)))
+@MainActor func qtd(_ valor: Double, idioma: Idioma = Ajustes.atual.idioma) -> String {
+    valor.formatted(FloatingPointFormatStyle<Double>(locale: idioma.locale).precision(.fractionLength(0...8)))
+}
+
+@MainActor func quando(_ instante: Date, data: Date.FormatStyle.DateStyle = .omitted, hora: Date.FormatStyle.TimeStyle = .omitted,
+                       idioma: Idioma = Ajustes.atual.idioma) -> String {
+    instante.formatted(Date.FormatStyle(date: data, time: hora, locale: idioma.locale))
 }
 
 func cor(_ valor: Double) -> Color {
@@ -117,7 +125,7 @@ struct Pilula: View {
     var body: some View {
         HStack(spacing: 3) {
             Seta(valor: fracao)
-            Text(abs(fracao).formatted(.percent.precision(.fractionLength(2))))
+            Text(pct(abs(fracao), sinal: false))
         }
         .font(.system(size: 11, weight: .semibold))
         .monospacedDigit()
@@ -126,7 +134,7 @@ struct Pilula: View {
         .padding(.vertical, 3)
         .background(cor(fracao).opacity(0.16), in: Capsule())
         .accessibilityElement()
-        .accessibilityLabel("Variação \(pct(fracao))")
+        .accessibilityLabel(tr("Variação \(pct(fracao))", "Change \(pct(fracao))"))
     }
 }
 
