@@ -68,6 +68,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         NSApp.setActivationPolicy(.accessory)
     }
 
+    // Abrir o app de novo (Finder, Launchpad, Spotlight) com ele já rodando mostra o painel.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        abrirPainel()
+        return false
+    }
+
     // Com o painel aberto o app está ativo, e o macOS esconderia o alerta de preço: mostra mesmo assim.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification)
         async -> UNNotificationPresentationOptions {
