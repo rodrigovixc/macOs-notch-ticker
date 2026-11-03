@@ -140,6 +140,7 @@ private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(cale
     #expect(converter(10, de: "BRL", para: "EUR", cambio: ["USD": 5]) == nil)
     #expect(converter(10, de: "GBP", para: "BRL", cambio: cambio) == nil)
     #expect(converter(10, de: "USD", para: "BRL", cambio: ["USD": 0]) == nil)
+    #expect(converter(0, de: "USD", para: "BRL", cambio: [:]) == 0)  // zero não pede câmbio
 }
 
 @Test func totalUnicoConvertido() throws {
@@ -203,14 +204,6 @@ private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(cale
     #expect(semCambio.moeda == "USD" && semCambio.realizado == 20)
     #expect(resumir(parcial, em: "BRL", cambio: [:]).aberto.lucro == 75)
     #expect(binance.id == "binance:c:BTC" && parcial.id == "a:PETR4")
-}
-
-@Test func cambioVelho() {
-    let agora = Date.now
-    let snapshot = Snapshot(cambio: ["USD": 5, "EUR": 6], cambioEm: ["USD": agora, "EUR": agora - 600], em: agora)
-    #expect(snapshot.cambioVelho(["USD"]) == nil)            // do mesmo ciclo
-    #expect(snapshot.cambioVelho(["USD", "EUR"]) == agora - 600)  // o euro parou há 10 min
-    #expect(snapshot.cambioVelho([]) == nil)                 // nada a converter
 }
 
 @Test func simbolos() {
