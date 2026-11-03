@@ -793,6 +793,13 @@ struct FormAdicionar: View {
                                 "Enter quantity and price as numbers greater than zero, like 1,234.50."))
                             .font(.caption)
                             .foregroundStyle(.red)
+                    } else if let operacao {
+                        // O total denuncia o separador trocado ("1.500" BTC é mil e quinhentos, não um e meio).
+                        // Sem ocultar: os dois números já estão visíveis nos campos.
+                        Text("Total: " + dinheiro(operacao.quantidade * operacao.preco, atual.moedaPrevista, oculto: false))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
                     DatePicker(tr("Data", "Date"), selection: $data, in: ...Date.now, displayedComponents: .date)
                     if problema == .dataFutura {
