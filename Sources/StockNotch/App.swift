@@ -138,12 +138,15 @@ struct Pilula: View {
     }
 }
 
+// Sem percentual para o realizado: o app não guarda sobre que custo ele foi apurado.
 struct TextoResultado: View {
     let resultado: Resultado
     let moeda: String
+    var comPercentual = true
 
     var body: some View {
-        Text("\(dinheiro(resultado.lucro, moeda, sinal: true)) (\(pct(resultado.percentual)))")
+        let valor = dinheiro(resultado.lucro, moeda, sinal: true)
+        Text(comPercentual ? "\(valor) (\(pct(resultado.percentual)))" : valor)
             .foregroundStyle(cor(resultado.lucro))
             .monospacedDigit()
     }

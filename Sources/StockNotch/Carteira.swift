@@ -1,21 +1,12 @@
 import Foundation
 import Observation
 
-struct Compra: Codable, Identifiable, Hashable {
-    var id = UUID()
-    var quantidade: Double
-    var preco: Double
-    var data: Date
-}
-
-struct Ativo: Codable, Identifiable {
+struct Ativo: Codable, Identifiable, Equatable {
     var simbolo: String
     var cripto: Bool
-    var compras: [Compra] = []
+    var compras: [Operacao] = []
+    var vendas: [Operacao] = []
     var id: String { (cripto ? "c:" : "a:") + simbolo }
-
-    var quantidade: Double { compras.reduce(0) { $0 + $1.quantidade } }
-    var custo: Double { compras.reduce(0) { $0 + $1.quantidade * $1.preco } }
 
     // PETR4 → PETR4.SA: ticker da B3 termina em número e o Yahoo pede o sufixo.
     var simboloYahoo: String {
@@ -30,6 +21,17 @@ struct Ativo: Codable, Identifiable {
         let s = texto.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber || (!cripto && ".-^".contains($0))) }
         // "BTCBRL" vira "BTC": o par em reais é montado na busca da cotação.
         return cripto && s.count > 3 && s.hasSuffix("BRL") ? String(s.dropLast(3)) : s
+    }
+}
+
+extension Ativo {
+    // Campos novos são opcionais no JSON: o carteira.json de antes das vendas continua legível.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        simbolo = try c.decode(String.self, forKey: .simbolo)
+        cripto = try c.decode(Bool.self, forKey: .cripto)
+        compras = try c.decodeIfPresent([Operacao].self, forKey: .compras) ?? []
+        vendas = try c.decodeIfPresent([Operacao].self, forKey: .vendas) ?? []
     }
 }
 
@@ -48,15 +50,21 @@ func resultado(custo: Double, valor: Double) -> Resultado {
     Resultado(lucro: valor - custo, percentual: custo > 0 ? (valor - custo) / custo : 0)
 }
 
-// Uma linha do notch ou do painel: ativo manual (com custo) ou saldo da Binance (custo nil).
+// Uma linha do notch ou do painel: ativo manual ou saldo da Binance. Custo e realizado na moeda do ativo;
+// custo nil é saldo da Binance sem preço médio, que entra no patrimônio mas não no resultado.
 struct Linha: Identifiable {
     let ativo: Ativo
     let quantidade: Double
     let custo: Double?
     let cotacao: Cotacao?
-    var id: String { (custo == nil ? "binance:" : "") + ativo.id }
+    var realizado = 0.0
+    var binance = false
+    var id: String { (binance ? "binance:" : "") + ativo.id }
     var valor: Double? { cotacao.map { $0.preco * quantidade } }
     var moeda: String { cotacao?.moeda ?? ativo.moedaPrevista }
+
+    // Posição cotada ou lucro de vendas: o que somar() conta (e por isso precisa de câmbio).
+    var entraNoTotal: Bool { (quantidade > 0 && cotacao != nil) || realizado != 0 }
 }
 
 struct Total {
@@ -65,9 +73,11 @@ struct Total {
     var hoje = 0.0
     var custo = 0.0
     var valorComCusto = 0.0
+    var realizado = 0.0
 
     var hojePct: Double { patrimonio - hoje > 0 ? hoje / (patrimonio - hoje) : 0 }
-    var lucro: Resultado { resultado(custo: custo, valor: valorComCusto) }
+    // Em aberto: valor de hoje das posições com custo menos esse custo. O realizado fica à parte.
+    var aberto: Resultado { resultado(custo: custo, valor: valorComCusto) }
 }
 
 // Quantos reais vale 1 unidade de cada moeda (o real é o pivô), ex.: ["USD": 5.4, "EUR": 6.2].
@@ -81,15 +91,16 @@ func converter(_ valor: Double, de origem: String, para destino: String, cambio:
     return valor * a / b
 }
 
-// Um total só, na moeda escolhida. Lucro só conta o que tem compra registrada.
-// nil quando falta câmbio para alguma posição: um total sem ela estaria errado.
+// Um total só, na moeda escolhida. Resultado em aberto só conta o que tem custo; o realizado vem das vendas,
+// mesmo de posição já zerada. nil quando falta câmbio para alguma linha: um total sem ela estaria errado.
 func somar(_ linhas: [Linha], em moeda: String, cambio: Cambio) -> Total? {
     var t = Total(moeda: moeda)
-    for linha in linhas where linha.quantidade > 0 {
-        guard let c = linha.cotacao else { continue }
-        guard let valor = converter(linha.quantidade * c.preco, de: c.moeda, para: moeda, cambio: cambio),
-              let custo = converter(linha.custo ?? 0, de: c.moeda, para: moeda, cambio: cambio)
-        else { return nil }
+    for linha in linhas where linha.entraNoTotal {
+        let emMoeda = { (valor: Double) in converter(valor, de: linha.moeda, para: moeda, cambio: cambio) }
+        guard let realizado = emMoeda(linha.realizado) else { return nil }
+        t.realizado += realizado
+        guard linha.quantidade > 0, let c = linha.cotacao else { continue }
+        guard let valor = emMoeda(linha.quantidade * c.preco), let custo = emMoeda(linha.custo ?? 0) else { return nil }
         t.patrimonio += valor
         t.hoje += valor - valor / (1 + c.variacao)
         if linha.custo != nil {
@@ -98,6 +109,12 @@ func somar(_ linhas: [Linha], em moeda: String, cambio: Cambio) -> Total? {
         }
     }
     return t
+}
+
+// Uma linha pela mesma conta do total, para o notch, a tabela e o total baterem.
+// Sem câmbio, fica na moeda do ativo (e com o símbolo dela): nunca convertida errado.
+func resumir(_ linha: Linha, em moeda: String, cambio: Cambio) -> Total {
+    somar([linha], em: moeda, cambio: cambio) ?? somar([linha], em: linha.moeda, cambio: [:]) ?? Total(moeda: linha.moeda)
 }
 
 // Cotações e câmbio buscados no mesmo ciclo e publicados de uma vez, para todas as telas baterem entre si.
@@ -133,6 +150,7 @@ final class Carteira {
     private(set) var snapshot = Snapshot()
     private(set) var erroArquivo: Falha?
     private(set) var saldosBinance: [String: Double] = [:]
+    private(set) var precoMedioBinance: [String: Double] = [:]  // em reais, por moeda
     private(set) var erroBinance: (any Error)?
     private var credencial: Credencial? = Chaveiro.ler()
 
@@ -145,14 +163,19 @@ final class Carteira {
     var atualizadoEm: Date? { snapshot.em }
 
     var linhas: [Linha] {
-        ativos.map { Linha(ativo: $0, quantidade: $0.quantidade, custo: $0.custo, cotacao: cotacoes[$0.id]) }
+        ativos.map { ativo in
+            let p = ativo.posicao
+            return Linha(ativo: ativo, quantidade: p.quantidade, custo: p.custo, cotacao: cotacoes[ativo.id], realizado: p.realizado)
+        }
     }
 
     var linhasBinance: [Linha] {
         saldosBinance
             .map { moeda, qtd in
                 let ativo = Ativo(simbolo: moeda, cripto: true)
-                return Linha(ativo: ativo, quantidade: qtd, custo: nil, cotacao: cotacoes[ativo.id])
+                // Com preço médio (em reais, a moeda da cotação de cripto), o saldo entra no resultado em aberto.
+                return Linha(ativo: ativo, quantidade: qtd, custo: precoMedioBinance[moeda].map { $0 * qtd },
+                             cotacao: cotacoes[ativo.id], binance: true)
             }
             .filter { ($0.valor ?? 0) >= 1 }  // esconde poeira abaixo de R$ 1
             .sorted { ($0.valor ?? 0) > ($1.valor ?? 0) }
@@ -174,32 +197,22 @@ final class Carteira {
         return snapshot.cambioVelho(usadas)
     }
 
-    // Moedas das posições com cotação que precisam de câmbio para a moeda escolhida.
+    // Moedas das linhas que somar() conta e que precisam de câmbio para a moeda escolhida.
     private var moedasConvertidas: Set<String> {
-        Set((linhas + linhasBinance).filter { $0.quantidade > 0 }.compactMap { $0.cotacao?.moeda }).subtracting([moeda])
+        Set((linhas + linhasBinance).filter(\.entraNoTotal).map(\.moeda)).subtracting([moeda])
     }
 
-    // Sem câmbio, o valor fica na moeda do ativo (e com o símbolo dela): nunca convertido errado.
-    func convertido(_ valor: Double, de origem: String) -> (valor: Double, moeda: String) {
-        converter(valor, de: origem, para: moeda, cambio: snapshot.cambio).map { ($0, moeda) } ?? (valor, origem)
-    }
-
-    // O percentual não muda com o câmbio, só o valor do lucro.
-    func lucro(_ linha: Linha) -> (resultado: Resultado, moeda: String)? {
-        guard let c = linha.cotacao, let custo = linha.custo, linha.quantidade > 0 else { return nil }
-        let r = resultado(custo: custo, valor: linha.quantidade * c.preco)
-        let lucro = convertido(r.lucro, de: c.moeda)
-        return (Resultado(lucro: lucro.valor, percentual: r.percentual), lucro.moeda)
-    }
+    // Valor, resultado em aberto e realizado de uma linha, na moeda escolhida (ou na do ativo, sem câmbio).
+    func resumo(_ linha: Linha) -> Total { resumir(linha, em: moeda, cambio: snapshot.cambio) }
 
     var simbolosSemCotacao: [String] { ativos.filter { falhas.contains($0.id) }.map(\.simbolo) }
 
     init() {
         guard let data = try? Data(contentsOf: arquivo) else { return }
         do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            ativos = try decoder.decode([Ativo].self, from: data)
+            let lido = try Arquivo.ler(data)
+            ativos = lido.ativos
+            precoMedioBinance = lido.precoMedioBinance
         } catch {
             // Não sobrescreve um arquivo que não conseguiu ler.
             erroArquivo = Falha("Não consegui ler \(arquivo.path). Nada será salvo até corrigir.",
@@ -207,7 +220,7 @@ final class Carteira {
         }
     }
 
-    func adicionar(simbolo: String, cripto: Bool, compra: Compra?) {
+    func adicionar(simbolo: String, cripto: Bool, compra: Operacao?) {
         let novo = Ativo(simbolo: simbolo, cripto: cripto, compras: compra.map { [$0] } ?? [])
         if let i = ativos.firstIndex(where: { $0.id == novo.id }) {
             if let compra { ativos[i].compras.append(compra) }
@@ -224,9 +237,25 @@ final class Carteira {
         salvar()
     }
 
-    func remover(_ compra: Compra, de ativo: Ativo) {
-        guard let i = ativos.firstIndex(where: { $0.id == ativo.id }) else { return }
-        ativos[i].compras.removeAll { $0.id == compra.id }
+    // Confere de novo o que o formulário já validou: venda sem saldo estragaria o preço médio.
+    func vender(_ venda: Operacao, de ativo: Ativo) {
+        guard let i = ativos.firstIndex(where: { $0.id == ativo.id }),
+              ativos[i].problema(venda: true, quantidade: venda.quantidade, data: venda.data) == nil
+        else { return }
+        ativos[i].vendas.append(venda)
+        salvar()
+    }
+
+    func remover(_ operacao: Operacao, de ativo: Ativo) {
+        guard let i = ativos.firstIndex(where: { $0.id == ativo.id }), ativos[i].podeApagar(operacao) else { return }
+        ativos[i].compras.removeAll { $0.id == operacao.id }
+        ativos[i].vendas.removeAll { $0.id == operacao.id }
+        salvar()
+    }
+
+    // nil apaga: o saldo volta a contar só no patrimônio.
+    func definirPrecoMedio(_ preco: Double?, para moeda: String) {
+        precoMedioBinance[moeda] = preco
         salvar()
     }
 
@@ -286,16 +315,42 @@ final class Carteira {
     private func salvar() {
         guard erroArquivo == nil else { return }
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try FileManager.default.createDirectory(at: arquivo.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try encoder.encode(ativos).write(to: arquivo, options: .atomic)
+            try Arquivo(ativos: ativos, precoMedioBinance: precoMedioBinance).dados().write(to: arquivo, options: .atomic)
         } catch {
             // Só o código do erro: o texto do sistema viria no idioma em que o app abriu.
             let codigo = (error as NSError).code
             erroArquivo = Falha("Não consegui salvar \(arquivo.path) (erro \(codigo)).", "Couldn't save \(arquivo.path) (error \(codigo)).")
         }
+    }
+}
+
+// Conteúdo do carteira.json. Antes das vendas era só a lista de ativos; ler() aceita os dois formatos.
+// Grava sempre o objeto: uma versão antiga do app recusa o arquivo (e não salva por cima) em vez de perder as vendas.
+struct Arquivo: Codable, Equatable {
+    var ativos: [Ativo] = []
+    var precoMedioBinance: [String: Double] = [:]
+
+    static func ler(_ dados: Data) throws -> Arquivo {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let antigo = try? decoder.decode([Ativo].self, from: dados) { return Arquivo(ativos: antigo) }
+        return try decoder.decode(Arquivo.self, from: dados)
+    }
+
+    func dados() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(self)
+    }
+}
+
+extension Arquivo {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ativos = try c.decodeIfPresent([Ativo].self, forKey: .ativos) ?? []
+        precoMedioBinance = try c.decodeIfPresent([String: Double].self, forKey: .precoMedioBinance) ?? [:]
     }
 }
 

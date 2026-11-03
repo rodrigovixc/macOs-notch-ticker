@@ -291,7 +291,7 @@ struct NotchView: View {
     // Um total só, na moeda escolhida. Sem câmbio para alguma posição, avisa em vez de somar errado.
     @ViewBuilder private var resumo: some View {
         if let total = carteira.total {
-            if total.patrimonio > 0 {
+            if total.patrimonio > 0 || total.realizado != 0 {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(tr("Patrimônio", "Portfolio value"))
                         .font(.system(size: 11, weight: .medium))
@@ -303,8 +303,13 @@ struct NotchView: View {
                     HStack(spacing: 14) {
                         Indicador(rotulo: tr("Hoje", "Today"), resultado: Resultado(lucro: total.hoje, percentual: total.hojePct), moeda: total.moeda)
                         if total.custo > 0 {
-                            Indicador(rotulo: tr("Resultado", "Return"), resultado: total.lucro, moeda: total.moeda)
+                            Indicador(rotulo: tr("Em aberto", "Unrealized"), resultado: total.aberto, moeda: total.moeda)
                         }
+                    }
+                    // Linha própria: três indicadores não cabem lado a lado no notch.
+                    if total.realizado != 0 {
+                        Indicador(rotulo: tr("Realizado", "Realized"), resultado: Resultado(lucro: total.realizado, percentual: 0),
+                                  moeda: total.moeda, comPercentual: false)
                     }
                 }
             }
@@ -369,12 +374,13 @@ struct Indicador: View {
     let rotulo: String
     let resultado: Resultado
     let moeda: String
+    var comPercentual = true
 
     var body: some View {
         HStack(spacing: 4) {
             Text(rotulo).foregroundStyle(.secondary)
             Seta(valor: resultado.lucro).foregroundStyle(cor(resultado.lucro))
-            TextoResultado(resultado: resultado, moeda: moeda)
+            TextoResultado(resultado: resultado, moeda: moeda, comPercentual: comPercentual)
         }
         .font(.system(size: 11, weight: .medium))
         .accessibilityElement(children: .combine)
@@ -387,11 +393,14 @@ struct LinhaNotch: View {
     let falhou: Bool
 
     var body: some View {
+        let r = carteira.resumo(linha)
+        let situacao = linha.quantidade > 0 ? tr("\(qtd(linha.quantidade)) un.", "Qty \(qtd(linha.quantidade))")
+            : linha.ativo.compras.isEmpty ? tr("acompanhando", "watching") : tr("posição encerrada", "position closed")
         HStack(spacing: 10) {
             Monograma(ativo: linha.ativo)
             VStack(alignment: .leading, spacing: 1) {
                 Text(linha.ativo.simbolo).font(.system(size: 13, weight: .semibold))
-                Text(linha.quantidade > 0 ? tr("\(qtd(linha.quantidade)) un.", "Qty \(qtd(linha.quantidade))") : tr("acompanhando", "watching"))
+                Text(situacao)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -401,15 +410,21 @@ struct LinhaNotch: View {
                     Text(dinheiro(c.preco, c.moeda))
                         .font(.system(size: 13, weight: .medium))
                         .contentTransition(.numericText())
-                    // Preço na moeda do ativo; resultado e valor da posição na moeda escolhida.
-                    if let lucro = carteira.lucro(linha) {
-                        TextoResultado(resultado: lucro.resultado, moeda: lucro.moeda)
+                    // Preço na moeda do ativo; resultado e valor da posição na moeda escolhida, pela conta do total.
+                    if r.custo > 0 {
+                        TextoResultado(resultado: r.aberto, moeda: r.moeda)
                             .font(.system(size: 11))
-                    } else if linha.custo == nil {
-                        let valor = carteira.convertido(linha.quantidade * c.preco, de: c.moeda)
-                        Text(dinheiro(valor.valor, valor.moeda))
+                    } else if linha.quantidade > 0 {
+                        // Saldo da Binance sem preço médio: só o valor.
+                        Text(dinheiro(r.patrimonio, r.moeda))
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
+                    } else if r.realizado != 0 {
+                        HStack(spacing: 4) {
+                            Text(tr("Realizado", "Realized")).foregroundStyle(.secondary)
+                            TextoResultado(resultado: Resultado(lucro: r.realizado, percentual: 0), moeda: r.moeda, comPercentual: false)
+                        }
+                        .font(.system(size: 11))
                     }
                 }
                 .monospacedDigit()
