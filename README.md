@@ -1,3 +1,5 @@
+<p align="center"><img src="Assets/AppIcon.png" width="160" alt="StockNotch icon"></p>
+
 # StockNotch
 
 A native macOS widget that lives in the MacBook notch and shows live stock and crypto prices, daily change and your portfolio's profit and loss. Hover the notch to expand it; move away and it tucks back in.
