@@ -48,6 +48,35 @@ private func disparos(_ alerta: inout Alerta, _ cotacoes: [Cotacao]) -> [Bool] {
     #expect(r == [false, true])
 }
 
+// "Variação do dia": um dia novo é outro aviso, mesmo sem a variação ter voltado abaixo do alvo.
+@Test func alertaDeVariacaoRearmaNoDiaSeguinte() {
+    let t = { (s: TimeInterval) in Date(timeIntervalSince1970: s) }
+    let segunda = DateInterval(start: t(0), duration: 25_200)  // pregão de 7 h
+    let terca = DateInterval(start: t(86_400), duration: 25_200)
+    let acao = { (v: Double, em: TimeInterval, pregao: DateInterval) in
+        Cotacao(preco: 10, variacao: v, moeda: "BRL", em: t(em), pregao: pregao)
+    }
+    var alerta = Alerta(tipo: .variacao, valor: 0.05, moeda: "BRL")
+    var r = disparos(&alerta, [acao(0.06, 3600, segunda), acao(0.065, 7200, segunda)])
+    #expect(r == [true, false])
+    // Terça antes da abertura: a cotação ainda é o fechamento de segunda (com a grade de terça). Não repete.
+    r = disparos(&alerta, [acao(0.065, 25_000, terca)])
+    #expect(r == [false])
+    // Terça abre com +6%: outro dia, outro aviso; no mesmo dia, um só.
+    r = disparos(&alerta, [acao(0.06, 87_000, terca), acao(0.07, 90_000, terca)])
+    #expect(r == [true, false])
+
+    // Cripto: o dia começa às 00:00 UTC.
+    var cripto = Alerta(tipo: .variacao, valor: 0.05, moeda: "USD")
+    let btc = { (em: TimeInterval) in Cotacao(preco: 1, variacao: -0.06, moeda: "USD", em: t(em)) }
+    r = disparos(&cripto, [btc(3600), btc(80_000), btc(86_460)])
+    #expect(r == [true, false, true])
+    // Acima e abaixo não têm dia: só rearmam ao voltar.
+    var acima = Alerta(tipo: .acima, valor: 5, moeda: "BRL")
+    r = disparos(&acima, [acao(0, 3600, segunda), acao(0, 87_000, terca)])
+    #expect(r == [true, false])
+}
+
 @Test func alertaInvalidoNaoDispara() {
     // Valor zero só vem de JSON editado à mão: nada de divisão por zero nem aviso.
     var alerta = Alerta(tipo: .acima, valor: 0, moeda: "BRL")
@@ -79,9 +108,14 @@ private func disparos(_ alerta: inout Alerta, _ cotacoes: [Cotacao]) -> [Bool] {
     #expect(try Arquivo.ler(Data(antigo.utf8)).ativos.first?.alertas == [])
     let semAlertas = #"{"ativos":[{"simbolo":"BTC","cripto":true,"compras":[],"vendas":[]}],"precoMedioBinance":{}}"#
     #expect(try Arquivo.ler(Data(semAlertas.utf8)).ativos.first?.alertas == [])
+    // Alerta de antes do avisouEm continua legível.
+    let alertaAntigo = #"{"ativos":[{"simbolo":"PETR4","cripto":false,"alertas":[{"id":"6F1C1D2E-0000-4000-8000-000000000002","tipo":"variacao","valor":0.05,"moeda":"BRL","disparado":true}]}]}"#
+    let lido = try #require(try Arquivo.ler(Data(alertaAntigo.utf8)).ativos.first?.alertas.first)
+    #expect(lido.disparado && lido.avisouEm == nil)
 
     // O estado de disparado vai junto: reabrir o app não repete o aviso.
-    let alertas = [Alerta(tipo: .acima, valor: 55.2, moeda: "BRL", disparado: true), Alerta(tipo: .variacao, valor: 0.05, moeda: "USD")]
+    let alertas = [Alerta(tipo: .acima, valor: 55.2, moeda: "BRL", disparado: true),
+                   Alerta(tipo: .variacao, valor: 0.05, moeda: "USD", disparado: true, avisouEm: Date(timeIntervalSince1970: 1_793_737_430))]
     let novo = Arquivo(ativos: [Ativo(simbolo: "PETR4", cripto: false, alertas: alertas)])
     #expect(try Arquivo.ler(novo.dados()) == novo)
 }

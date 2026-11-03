@@ -124,8 +124,39 @@ private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(cale
     let novo = Arquivo(ativos: [Ativo(simbolo: "PETR4", cripto: false, compras: ativo.compras, vendas: [op(40, 52, dia(12))])],
                        precoMedioBinance: ["BTC": 350_000.5])
     #expect(try Arquivo.ler(novo.dados()) == novo)
-    // Arquivo estragado dá erro: o app então não salva por cima.
+    // Arquivo estragado dá erro: o app então não salva por cima. Sem a lista de ativos também (chave digitada
+    // errado, null, objeto vazio): não é uma carteira vazia.
     #expect(throws: (any Error).self) { try Arquivo.ler(Data("[{\"simbolo\": 1}]".utf8)) }
+    for estragado in [#"{"ativoss": []}"#, #"{"ativos": null}"#, "{}", #"{"precoMedioBinance": {"BTC": 1}}"#] {
+        #expect(throws: (any Error).self) { try Arquivo.ler(Data(estragado.utf8)) }
+    }
+}
+
+// Do disco: só "não há nada no caminho" vira carteira vazia. Qualquer outro problema de leitura é erro, para o app
+// não gravar uma carteira vazia por cima. Numa pasta temporária: nada de tocar no carteira.json de verdade.
+@Test func arquivoNoDisco() throws {
+    let fm = FileManager.default
+    let pasta = fm.temporaryDirectory.appending(path: "StockNotchTests-\(UUID().uuidString)")
+    try fm.createDirectory(at: pasta, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: pasta) }
+
+    #expect(try Arquivo.abrir(pasta.appending(path: "carteira.json")) == nil)
+    let bom = pasta.appending(path: "bom.json")
+    let novo = Arquivo(ativos: [Ativo(simbolo: "PETR4", cripto: false, compras: [op(1, 10, dia(1))])])
+    try novo.dados().write(to: bom)
+    #expect(try Arquivo.abrir(bom) == novo)
+
+    // Pasta, link quebrado ou arquivo sem permissão no lugar do carteira.json.
+    let pastaNoLugar = pasta.appending(path: "pasta.json")
+    try fm.createDirectory(at: pastaNoLugar, withIntermediateDirectories: true)
+    #expect(throws: (any Error).self) { try Arquivo.abrir(pastaNoLugar) }
+    let link = pasta.appending(path: "link.json")
+    try fm.createSymbolicLink(at: link, withDestinationURL: pasta.appending(path: "sumiu.json"))
+    #expect(throws: (any Error).self) { try Arquivo.abrir(link) }
+    let trancado = pasta.appending(path: "trancado.json")
+    try novo.dados().write(to: trancado)
+    try fm.setAttributes([.posixPermissions: 0], ofItemAtPath: trancado.path)
+    #expect(throws: (any Error).self) { try Arquivo.abrir(trancado) }
 }
 
 @Test func conversaoDeMoedas() {
@@ -240,6 +271,24 @@ private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(cale
     #expect(numero("0,5", idioma: .en) == nil)
     #expect(numero("1,5", idioma: .en) == nil)
     #expect(numero("1,23,456", idioma: .en) == nil)
+    #expect(numero("0,050", idioma: .en) == nil)  // seria 50: zero à esquerda não começa grupo de milhar
+    #expect(numero(".5", idioma: .en) == 0.5)
+
+    // Em português o ponto antes de grupos de três dígitos é milhar, como o app mostra: "350.000" é 350 mil, não 350.
+    #expect(numero("350.000") == 350_000)
+    #expect(numero("600.000") == 600_000)
+    #expect(numero("1.234.567,89") == 1_234_567.89)
+    // Sem poder ser milhar, o ponto é decimal.
+    #expect(numero("0.050") == 0.05)
+    #expect(numero("12.50") == 12.5)
+    #expect(numero("1.2345") == 1.2345)
+    // Formato do outro idioma, ou o que o Double() aceitaria mas não é um número digitado: nil, para o form avisar.
+    #expect(numero("1,234.56") == nil)
+    #expect(numero("1.23.4") == nil)
+    for estranho in ["inf", "nan", "1e400", "0x10", "-5", "1 234", "5%"] {
+        #expect(numero(estranho) == nil && numero(estranho, idioma: .en) == nil)
+    }
+    #expect(numero(String(repeating: "9", count: 400)) == nil)  // só dígitos, mas infinito
 }
 
 @MainActor @Test func traducao() {
@@ -252,7 +301,9 @@ private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(cale
     #expect(mensagem(URLError(.notConnectedToInternet), idioma: .pt) == "Sem conexão com a internet.")
     #expect(mensagem(URLError(.notConnectedToInternet), idioma: .en) == "No internet connection.")
     #expect(mensagem(ErroServico(code: -2015, msg: "Invalid API-key").falha, idioma: .pt).hasPrefix("Chave recusada"))
-    #expect(mensagem(ErroServico(code: -9999, msg: "Odd").falha, idioma: .en) == "Request refused: Odd")
+    // A explicação da Binance é só em inglês: em português fica o código.
+    #expect(mensagem(ErroServico(code: -9999, msg: "Odd").falha, idioma: .en) == "Request refused by Binance: Odd")
+    #expect(mensagem(ErroServico(code: -9999, msg: "Odd").falha, idioma: .pt) == "Pedido recusado pela Binance (código -9999).")
 }
 
 // O ICU separa o símbolo com espaço inseparável em pt_BR; troca por espaço comum para comparar.
@@ -293,4 +344,20 @@ private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(cale
     let consulta = "symbol=LTCBTC&side=BUY&type=LIMIT&timeInForce=GTC&quantity=1&price=0.1&recvWindow=5000&timestamp=1499827319559"
     #expect(Binance.assinatura(consulta, segredo: "NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j")
             == "c8db56825ae71d6d79447849e617115f4a920fa2acdcab2b053c4b2838bd6b71")
+}
+
+// Resposta do apiRestrictions com os campos da documentação da Binance. A chave só de leitura passa; qualquer
+// permissão ligada além da leitura recusa, inclusive as que o app não conhece.
+@Test func chaveSoDeLeitura() throws {
+    let resposta = #"{"ipRestrict":false,"createTime":1698645219000,"enableReading":true,"enableWithdrawals":false,"enableInternalTransfer":false,"enableMargin":false,"enableFutures":false,"permitsUniversalTransfer":false,"enableVanillaOptions":false,"enableFixApiTrade":false,"enableFixReadOnly":true,"enableSpotAndMarginTrading":false,"enablePortfolioMarginTrading":false}"#
+    let ler = { (json: String) in try JSONDecoder().decode(Permissoes.self, from: Data(json.utf8)) }
+    let ligando = { (campo: String) in resposta.replacingOccurrences(of: "\"\(campo)\":false", with: "\"\(campo)\":true") }
+    #expect(try ler(resposta).soLeitura)
+    #expect(try ler(ligando("ipRestrict")).soLeitura)  // restrição de IP só ajuda
+    for perigosa in ["enableVanillaOptions", "enablePortfolioMarginTrading", "enableFixApiTrade", "enableWithdrawals", "permitsUniversalTransfer"] {
+        #expect(try !ler(ligando(perigosa)).soLeitura, "\(perigosa)")
+    }
+    #expect(try !ler(resposta.replacingOccurrences(of: #""enableReading":true"#, with: #""enableReading":false"#)).soLeitura)
+    // Uma permissão que a Binance criar depois também recusa.
+    #expect(try !ler(#"{"enableReading":true,"enableAlgoNovo":true}"#).soLeitura)
 }

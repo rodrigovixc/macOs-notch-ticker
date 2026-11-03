@@ -122,15 +122,21 @@ func resumir(_ linha: Linha, em moeda: String, cambio: Cambio) -> Total {
 
 // Saldos da Binance como linhas, do maior para o menor. Poeira (menos de 1 na moeda da cotação: R$ 1, ou US$ 1 com a
 // moeda escolhida em dólar) fica de fora. Sem câmbio a conta é em dólar: o saldo aparece com "sem câmbio" em vez de sumir.
-func linhasDeSaldo(_ saldos: [String: Double], precoMedio: [String: Double], snapshot: Snapshot, moeda: String) -> [Linha] {
+// Moeda cuja busca falhou (falhas) tem valor desconhecido, que não é poeira: fica no fim, e o aviso de "sem cotação"
+// diz que o total não a inclui. A que ainda não foi buscada espera, para a poeira não piscar na lista.
+func linhasDeSaldo(_ saldos: [String: Double], precoMedio: [String: Double], snapshot: Snapshot, moeda: String,
+                   falhas: Set<String> = []) -> [Linha] {
     let linhas = saldos.map { simbolo, qtd in
         let ativo = Ativo(simbolo: simbolo, cripto: true)
         // Com preço médio (em reais, a moeda de custo da cripto), o saldo entra no resultado em aberto.
         return Linha(ativo: ativo, quantidade: qtd, custo: precoMedio[simbolo].map { $0 * qtd },
                      cotacao: snapshot.cotacao(ativo, moeda: moeda), binance: true)
     }
-    let valor = { (l: Linha) in l.valor ?? snapshot.emDolar[l.ativo.id].map { $0.preco * l.quantidade } ?? 0 }
-    return linhas.filter { valor($0) >= 1 }.sorted { valor($0) > valor($1) }
+    let valor = { (l: Linha) in l.valor ?? snapshot.emDolar[l.ativo.id].map { $0.preco * l.quantidade } }
+    return linhas.filter { valor($0).map { $0 >= 1 } ?? falhas.contains($0.ativo.id) }.sorted { a, b in
+        let (va, vb) = (valor(a) ?? -1, valor(b) ?? -1)
+        return va != vb ? va > vb : a.ativo.simbolo < b.ativo.simbolo  // empate (sem valor) por símbolo: a lista não pula
+    }
 }
 
 // Moedas sem câmbio em dia para somar as linhas na moeda escolhida; com alguma, não há total. Cripto sem o dólar
@@ -146,15 +152,23 @@ func cambiosEmFalta(_ linhas: [Linha], em moeda: String, snapshot: Snapshot) -> 
     return moedas.filter { converter(1, de: $0, para: moeda, cambio: snapshot.cambio) == nil }.sorted()
 }
 
-// Em português aceita "1.234,56", "0,5" e "0.5"; em inglês a vírgula separa milhar: "1,234.56".
+// Em português "1.234,56", "350.000" (milhar, como o app mostra), "0,5" e "0.5"; em inglês "1,234.56" e "0.5".
+// Só dígitos e separadores (Double() leria "inf", "1e400" e "0x10") num formato só do idioma: "1,234.56" em português
+// ou "0,050" e "32,50" em inglês dão nil, para o form avisar em vez de gravar um valor mil vezes errado.
 func numero(_ texto: String, idioma: Idioma = .pt) -> Double? {
     let t = texto.trimmingCharacters(in: .whitespaces)
+    let normalizado: String
     if idioma == .en {
-        // "32,50" ou "0,5" é vírgula decimal: nil para o form avisar, em vez de gravar 3250 ou 5.
-        guard !t.contains(",") || t.wholeMatch(of: #/\d{1,3}(,\d{3})*(\.\d+)?/#) != nil else { return nil }
-        return Double(t.replacingOccurrences(of: ",", with: ""))
+        guard t.wholeMatch(of: #/([1-9]\d{0,2}(,\d{3})+|\d*)(\.\d+)?/#) != nil else { return nil }
+        normalizado = t.replacingOccurrences(of: ",", with: "")
+    } else if t.wholeMatch(of: #/([1-9]\d{0,2}(\.\d{3})+|\d*)(,\d+)?/#) != nil {
+        normalizado = t.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".")
+    } else {
+        // Ponto decimal também vale em português quando não pode ser milhar ("0.5", "12.50").
+        guard t.wholeMatch(of: #/\d*\.\d+/#) != nil else { return nil }
+        normalizado = t
     }
-    return Double(t.contains(",") ? t.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".") : t)
+    return Double(normalizado).flatMap { $0.isFinite ? $0 : nil }
 }
 
 @MainActor @Observable
@@ -189,7 +203,9 @@ final class Carteira {
         }
     }
 
-    var linhasBinance: [Linha] { linhasDeSaldo(saldosBinance, precoMedio: precoMedioBinance, snapshot: snapshot, moeda: moeda) }
+    var linhasBinance: [Linha] {
+        linhasDeSaldo(saldosBinance, precoMedio: precoMedioBinance, snapshot: snapshot, moeda: moeda, falhas: falhas)
+    }
 
     // Preço fica na moeda do ativo; valor, resultado e totais vão para a moeda escolhida nos Ajustes.
     var moeda: String { Ajustes.atual.moeda.rawValue }
@@ -205,10 +221,14 @@ final class Carteira {
     // Moedas que não dá para converter agora (sem câmbio ou com câmbio velho); com alguma, não há total.
     var semCambio: [String] { cambiosEmFalta(linhas + linhasBinance, em: moeda, snapshot: snapshot) }
 
-    // Desde quando o câmbio que falta parou de chegar; nil se ele nunca chegou.
-    var cambioParado: Date? {
-        Set(semCambio + [moeda]).subtracting(["BRL"]).filter { snapshot.cambio[$0] == nil }.compactMap { snapshot.cambioEm[$0] }.min()
+    // As moedas sem taxa em dia (a do real é 1): o que falta para converter, e o que o aviso nomeia. Com o euro
+    // escolhido e a carteira só em reais, falta o EUR, não o BRL.
+    var cambiosFaltando: [String] {
+        Set(semCambio + [moeda]).subtracting(["BRL"]).filter { snapshot.cambio[$0] == nil }.sorted()
     }
+
+    // Desde quando o câmbio que falta parou de chegar; nil se ele nunca chegou.
+    var cambioParado: Date? { cambiosFaltando.compactMap { snapshot.cambioEm[$0] }.min() }
 
     // Ativos cuja cotação parou de chegar há mais de 2 min, com o horário da mais antiga, para o aviso do rodapé.
     var paradas: (simbolos: [String], desde: Date)? {
@@ -222,13 +242,17 @@ final class Carteira {
     func resumo(_ linha: Linha) -> Total { resumir(linha, em: moeda, cambio: snapshot.cambio) }
 
     // Só quem nunca teve cotação: quem já teve mostra a última e, passados 2 min, o aviso de dado velho.
-    var simbolosSemCotacao: [String] { ativos.filter { falhas.contains($0.id) && cotacao($0) == nil }.map(\.simbolo) }
+    // Saldo da Binance também: fora do total, que sem o aviso pareceria completo.
+    var simbolosSemCotacao: [String] {
+        var vistos = Set<String>()
+        return (linhas + linhasBinance).filter { $0.cotacao == nil && falhas.contains($0.ativo.id) }
+            .map(\.ativo.simbolo).filter { vistos.insert($0).inserted }
+    }
 
     init() {
         stream = StreamBinance { [weak self] moeda, cotacao in self?.receber(moeda, cotacao) }
-        guard let data = try? Data(contentsOf: arquivo) else { return }
         do {
-            let lido = try Arquivo.ler(data)
+            guard let lido = try Arquivo.abrir(arquivo) else { return }
             ativos = lido.ativos
             precoMedioBinance = lido.precoMedioBinance
         } catch {
@@ -317,13 +341,16 @@ final class Carteira {
     }
 
     func atualizar() async {
-        if let credencial {
+        // A conta pode mudar durante o pedido (desconectar, outra chave): o resultado só vale para a que pediu.
+        if let usada = credencial {
             do {
-                let saldos = try await Binance.saldos(credencial)
-                if self.credencial != nil { saldosBinance = saldos }
-                erroBinance = nil
+                let saldos = try await Binance.saldos(usada)
+                if credencial?.chave == usada.chave {
+                    saldosBinance = saldos
+                    erroBinance = nil
+                }
             } catch {
-                erroBinance = error
+                if credencial?.chave == usada.chave { erroBinance = error }
             }
         }
         var lista = ativos
@@ -356,15 +383,16 @@ final class Carteira {
             }
         }
         fontes.cambio.merge(novoCambio) { $1 }
-        // Só avisa dos ativos manuais; moeda da Binance sem cotação só some da lista.
-        falhas = Set(resultados.filter { $0.1 == nil }.map(\.0.id)).intersection(ativos.map(\.id))
+        // Ativos manuais e saldos da Binance: os dois entram no total, então os dois avisam.
+        falhas = Set(resultados.filter { $0.1 == nil }.map(\.0.id))
         publicar()
         // À parte: o próximo ciclo de cotações não espera pelas séries.
         Task { await atualizarSeries() }
     }
 
-    // Séries a cada 60 s, só do que aparece na tela (a poeira da Binance não). Ativo novo (adicionado, ou saldo novo
-    // na Binance) não espera a volta. Falhou? Fica a anterior, que o ajuste corta quando o dia vira.
+    // Séries a cada 60 s, só do que aparece na tela (a poeira da Binance não; a tabela do painel mostra todos os
+    // ativos, não só os 10 do notch). Ativo novo (adicionado, ou saldo novo na Binance) não espera a volta: só ele
+    // é buscado. Falhou? Fica a anterior, que o ajuste corta quando o dia vira.
     private func atualizarSeries() async {
         var vistos = Set<String>()
         let pedidos = (ativos + linhasBinance.map(\.ativo)).compactMap { a -> (ativo: Ativo, emReais: Bool)? in
@@ -374,19 +402,28 @@ final class Carteira {
             return fontes.cripto[a.id].map { (a, $0.moeda == "BRL") }
         }
         let ids = Set(pedidos.map(\.ativo.id))
-        guard !buscandoSeries, Date.now.timeIntervalSince(seriesEm) >= 60 || !ids.isSubset(of: seriesPedidas) else { return }
+        let rodada = Date.now.timeIntervalSince(seriesEm) >= 60
+        let novos = ids.subtracting(seriesPedidas)
+        guard !buscandoSeries, rodada || !novos.isEmpty else { return }
         buscandoSeries = true
-        seriesEm = .now
-        seriesPedidas = ids
-        let comDolar = pedidos.contains { $0.ativo.cripto && !$0.emReais }
+        if rodada {
+            seriesEm = .now
+            seriesPedidas = ids
+        } else {
+            seriesPedidas.formUnion(novos)
+        }
+        let escolhidos = rodada ? pedidos : pedidos.filter { novos.contains($0.ativo.id) }
+        let comDolar = escolhidos.contains { $0.ativo.cripto && !$0.emReais } && (rodada || fontes.serieDolar.isEmpty)
         async let dolar = comDolar ? (try? Fonte.serieYahoo("USDBRL=X")) : nil
         let novas = await withTaskGroup(of: (String, Serie?).self) { grupo in
-            for p in pedidos { grupo.addTask { (p.ativo.id, try? await Fonte.serie(p.ativo, emReais: p.emReais)) } }
+            for p in escolhidos { grupo.addTask { (p.ativo.id, try? await Fonte.serie(p.ativo, emReais: p.emReais)) } }
             var r: [(String, Serie?)] = []
             for await item in grupo { r.append(item) }
             return r
         }
-        for case let (id, serie?) in novas { fontes.series[id] = serie }
+        // Só o que continua na carteira: um ativo removido durante a busca não ganha a série de volta.
+        let atuais = Set(ativos.map(\.id) + saldosBinance.keys.map { Ativo(simbolo: $0, cripto: true).id })
+        for case let (id, serie?) in novas where atuais.contains(id) { fontes.series[id] = serie }
         if let d = await dolar { fontes.serieDolar = d.pontos }
         buscandoSeries = false
         publicar()
@@ -453,6 +490,18 @@ struct Arquivo: Codable, Equatable {
     var ativos: [Ativo] = []
     var precoMedioBinance: [String: Double] = [:]
 
+    // nil só quando não há nada no caminho (a primeira vez). Sem permissão, erro de disco, pasta ou link quebrado no
+    // lugar do arquivo: erro, para o app não gravar uma carteira vazia por cima.
+    static func abrir(_ url: URL) throws -> Arquivo? {
+        do {
+            return try ler(Data(contentsOf: url))
+        } catch let erro as CocoaError where erro.code == .fileReadNoSuchFile {
+            // attributesOfItem não segue o link: um link quebrado existe e não conta como "não há arquivo".
+            guard (try? FileManager.default.attributesOfItem(atPath: url.path)) == nil else { throw erro }
+            return nil
+        }
+    }
+
     static func ler(_ dados: Data) throws -> Arquivo {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -470,8 +519,9 @@ struct Arquivo: Codable, Equatable {
 
 extension Arquivo {
     init(from decoder: any Decoder) throws {
+        // ativos é obrigatório: {} ou "ativoss" digitado à mão seria lido como carteira vazia e apagado na gravação.
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        ativos = try c.decodeIfPresent([Ativo].self, forKey: .ativos) ?? []
+        ativos = try c.decode([Ativo].self, forKey: .ativos)
         precoMedioBinance = try c.decodeIfPresent([String: Double].self, forKey: .precoMedioBinance) ?? [:]
     }
 }

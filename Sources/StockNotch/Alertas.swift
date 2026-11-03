@@ -12,6 +12,7 @@ struct Alerta: Codable, Identifiable, Hashable {
     var valor: Double      // preço em `moeda`; na variação, a fração (0.05 = ±5%)
     var moeda: String      // a do preço quando o alerta foi criado: cripto em R$ ou US$ não muda com a moeda escolhida
     var disparado = false  // já avisou e o preço ainda não voltou para o outro lado; salvo para não repetir ao reabrir o app
+    var avisouEm: Date?    // variação: o horário da cotação que avisou; opcional no JSON (alertas de antes não têm)
 
     // Folga para rearmar: o preço tem que voltar 0,1% além do alvo (na variação, 0,1 ponto). Sem ela, cripto
     // oscilando em cima do alvo (um tick a cada 2 s) daria uma notificação atrás da outra.
@@ -26,12 +27,17 @@ struct Alerta: Codable, Identifiable, Hashable {
         }
     }
 
-    // true quando deve notificar agora: atingiu estando armado. Rearma ao voltar para o outro lado.
+    // true quando deve notificar agora: atingiu estando armado. Rearma ao voltar para o outro lado e, na variação,
+    // também quando a cotação passa a ser de um dia (pregão, ou 00:00 UTC na cripto) que começou depois do aviso:
+    // abrir com +6% depois de um dia de +6% é outro aviso. Antes da abertura a cotação ainda é do pregão anterior
+    // (início do dia sem limite) e não rearma.
     mutating func conferir(_ c: Cotacao) -> Bool {
         guard valor > 0 else { return false }
+        if tipo == .variacao, disparado, let avisouEm, c.inicioDoDia > avisouEm { disparado = false }
         let d = distancia(c)
         if d >= 0 && !disparado {
             disparado = true
+            if tipo == .variacao { avisouEm = c.em }
             return true
         }
         if d < -Self.folga { disparado = false }

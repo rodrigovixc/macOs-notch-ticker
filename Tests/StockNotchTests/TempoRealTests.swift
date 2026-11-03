@@ -75,6 +75,14 @@ private func t(_ segundos: TimeInterval) -> Date { Date(timeIntervalSince1970: s
     manha.recebida = t(1793711400)
     #expect(manha.selo(agora: t(1793711400)) == .fechado)
 
+    // Logo depois das 17:00 do dado (17:15:30 no relógio): o negócio das 17:00:25 já estende o pregão. Antes, a B3
+    // aparecia fechada no meio do pregão até o negócio passar das 17:01.
+    var virada = petr
+    virada.em = t(1793736000 + 25)
+    virada.recebida = t(1793736000 + 925)
+    #expect(virada.aberto(agora: t(1793736000 + 930)))
+    #expect(virada.selo(agora: t(1793736000 + 930)) == .atraso(900))
+
     // EUA: ao vivo durante o pregão; fechado logo depois das 16:00 (sem estender) e em feriado (sem negócio hoje).
     let aapl = try JSONDecoder().decode(RespostaYahoo.self, from: chart(metaAAPL)).cotacao(recebida: t(1793738331))
     #expect(aapl.selo(agora: t(1793738335)) == .aoVivo)
@@ -82,6 +90,12 @@ private func t(_ segundos: TimeInterval) -> Date { Date(timeIntervalSince1970: s
     depois.em = t(1793739600)
     depois.recebida = t(1793739630)
     #expect(depois.selo(agora: t(1793739630)) == .fechado)
+    // Fechamento carimbado segundos depois (16:00:02): estende só 1 min, não os 5 da grade errada.
+    var leilao = aapl
+    leilao.em = t(1793739602)
+    leilao.recebida = t(1793739665)
+    #expect(leilao.aberto(agora: t(1793739661)) && !leilao.aberto(agora: t(1793739663)))
+    #expect(leilao.selo(agora: t(1793739670)) == .fechado)
     var feriado = aapl
     feriado.em = t(1793739600 - 86400)
     #expect(feriado.selo(agora: t(1793738335)) == .fechado)
@@ -158,6 +172,10 @@ private func t(_ segundos: TimeInterval) -> Date { Date(timeIntervalSince1970: s
     reserva.cambio["USD"]?.atraso = nil
     let convertida = try #require(Snapshot(reserva, agora: agora).cotacoes["c:BTC"])
     #expect(convertida.atraso == nil && convertida.selo(agora: agora) == .horario(convertida.em))
+    // Câmbio parado na fonte (ou do cache da reserva): o preço em reais tem a idade dele, sem "ao vivo".
+    let dolarParado = Cotacao(preco: 5.5, variacao: 0, moeda: "BRL", em: agora - 300, recebida: agora)
+    let btcReais = Cotacao(preco: 78_000, variacao: 0, moeda: "USD", em: agora, recebida: agora).emReais(dolarParado)
+    #expect(btcReais.em == agora - 300 && btcReais.selo(agora: agora) == .horario(agora - 300))
 
     // E sem câmbio o total que precisa dele não sai.
     let aapl = Linha(ativo: Ativo(simbolo: "AAPL", cripto: false), quantidade: 1, custo: nil, cotacao: Cotacao(preco: 300, variacao: 0, moeda: "USD"))
@@ -239,6 +257,13 @@ private let awesome = #"{"USDBRL":{"code":"USD","codein":"BRL","name":"Dólar Am
     let emReais = try #require(somar(linhasDeSaldo(["BTC": 0.5], precoMedio: precoMedio, snapshot: comCambio, moeda: "BRL"),
                                      em: "BRL", cambio: comCambio.cambio))
     #expect(emReais.patrimonio == 5000 && emReais.custo == 4000 && emReais.aberto.lucro == emDolar.aberto.lucro * 5)
+
+    // Moeda cuja busca falhou não tem valor, mas não é poeira: fica no fim da lista, onde o aviso de sem cotação a
+    // aponta (o total não a inclui). A que ainda não foi buscada espera, para a poeira não piscar na lista.
+    let semPreco = linhasDeSaldo(["BTC": 0.5, "XYZ": 3, "ABC": 1], precoMedio: [:], snapshot: comCambio, moeda: "BRL",
+                                 falhas: ["c:XYZ", "c:ABC"])
+    #expect(semPreco.map(\.ativo.simbolo) == ["BTC", "ABC", "XYZ"] && semPreco[1].cotacao == nil)
+    #expect(linhasDeSaldo(["XYZ": 3], precoMedio: [:], snapshot: comCambio, moeda: "BRL").isEmpty)
 }
 
 @Test func esperaParaReconectar() {

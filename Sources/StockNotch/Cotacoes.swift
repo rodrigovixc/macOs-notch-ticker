@@ -29,11 +29,14 @@ extension Cotacao {
     func velha(agora: Date) -> Bool { agora.timeIntervalSince(recebida) > Self.prazo }
 
     // Aberto no horário que o dado mostra (agora − atraso). A grade do Yahoo pode estar errada (em 03/11/2026
-    // dava a B3 até 17:00, e ela foi até 18:00): negócio bem depois do fim estende o pregão.
+    // dava a B3 até 17:00, e ela foi até 18:00): negócio depois do fim estende o pregão, 5 min além do último
+    // quando passa do fim em mais de 1 min (a grade errada) e só 1 min quando é o fechamento carimbado segundos
+    // depois (EUA: 16:00:02). Estender desde o primeiro negócio depois do fim evita que a B3 apareça fechada no
+    // meio do pregão enquanto o dado atrasado atravessa as 17:00.
     // Sem negócio desde o início do pregão é feriado ou pré-abertura: fechado.
     func aberto(agora: Date) -> Bool {
         guard let pregao else { return true }
-        let fim = em > pregao.end + 60 ? em + 300 : pregao.end
+        let fim = em <= pregao.end ? pregao.end : em + (em > pregao.end + 60 ? 300 : 60)
         return em >= pregao.start && agora - (atraso ?? 0) < fim
     }
 
@@ -49,12 +52,14 @@ extension Cotacao {
     }
 
     // Como o Google monta o BTC-BRL: BTC-USD × USD-BRL, com a variação das duas desde 00:00 UTC.
-    // O preço em reais chega com o mais velho dos dois e tem o maior atraso (desconhecido com o câmbio da reserva).
+    // O preço em reais tem a idade do mais velho dos dois (na fonte e na chegada) e o maior atraso (desconhecido
+    // com o câmbio da reserva): câmbio parado na fonte não deixa o selo dizer "ao vivo".
     func emReais(_ dolar: Cotacao) -> Cotacao {
         var c = self
         c.preco = preco * dolar.preco
         c.variacao = (1 + variacao) * (1 + dolar.variacao) - 1
         c.moeda = "BRL"
+        c.em = min(em, dolar.em)
         c.recebida = min(recebida, dolar.recebida)
         c.atraso = atraso.flatMap { a in dolar.atraso.map { max(a, $0) } }
         return c
@@ -251,7 +256,9 @@ struct ErroServico: Decodable {
         case -1003:
             Falha("Pedidos demais; tente de novo em alguns minutos.", "Too many requests; try again in a few minutes.")
         default:
-            Falha("Pedido recusado: \(msg)", "Request refused: \(msg)", codigo: code)
+            // A explicação da Binance vem em inglês: em português fica só o código, para quem for procurar.
+            Falha(code.map { "Pedido recusado pela Binance (código \($0))." } ?? "Pedido recusado pela Binance.",
+                  "Request refused by Binance: \(msg)", codigo: code)
         }
     }
 }
