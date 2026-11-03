@@ -1,0 +1,5 @@
+# Saída do build (swift build / build.sh)
+.build/
+*.app
+.swiftpm/
+.DS_Store
