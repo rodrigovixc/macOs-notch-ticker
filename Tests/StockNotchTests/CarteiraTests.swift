@@ -2,23 +2,130 @@ import Foundation
 import Testing
 @testable import StockNotch
 
+// Dias fixos ao meio-dia UTC, contados num calendário UTC: o teste não depende do fuso do Mac.
+private let utc: Calendar = {
+    var c = Calendar(identifier: .gregorian)
+    c.timeZone = TimeZone(identifier: "UTC")!
+    return c
+}()
+
+private func dia(_ d: Int, hora: Int = 12) -> Date {
+    utc.date(from: DateComponents(year: 2026, month: 9, day: d, hour: hora))!
+}
+
+private func op(_ quantidade: Double, _ preco: Double, _ data: Date) -> Operacao {
+    Operacao(quantidade: quantidade, preco: preco, data: data)
+}
+
+private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(calendario: utc)) }
+
 @Test func lucroPeloPrecoMedio() {
     let ativo = Ativo(simbolo: "PETR4", cripto: false, compras: [
-        Compra(quantidade: 10, preco: 20, data: .now),
-        Compra(quantidade: 10, preco: 30, data: .now),
+        Operacao(quantidade: 10, preco: 20, data: .now),
+        Operacao(quantidade: 10, preco: 30, data: .now),
     ])
-    #expect(ativo.quantidade == 20)
-    #expect(ativo.custo == 500)
+    #expect(ativo.posicao.quantidade == 20)
+    #expect(ativo.posicao.custo == 500)
 
-    let ganho = resultado(custo: ativo.custo, valor: ativo.quantidade * 30)
+    let ganho = resultado(custo: ativo.posicao.custo, valor: ativo.posicao.quantidade * 30)
     #expect(ganho.lucro == 100)
     #expect(ganho.percentual == 0.2)
 
-    let perda = resultado(custo: ativo.custo, valor: ativo.quantidade * 20)
+    let perda = resultado(custo: ativo.posicao.custo, valor: ativo.posicao.quantidade * 20)
     #expect(perda.lucro == -100)
     #expect(perda.percentual == -0.2)
 
     #expect(resultado(custo: 0, valor: 0).percentual == 0)
+}
+
+@Test func vendasPeloPrecoMedio() {
+    // Várias compras e venda parcial: o preço médio não muda com a venda.
+    var ativo = Ativo(simbolo: "PETR4", cripto: false, compras: [op(10, 20, dia(1)), op(10, 30, dia(2))], vendas: [op(5, 40, dia(3))])
+    var p = posicao(ativo)
+    #expect(p.quantidade == 15)
+    #expect(p.custo == 375)            // 500 − 5 × 25
+    #expect(p.precoMedio == 25)
+    #expect(p.realizado == 75)         // (40 − 25) × 5
+    #expect(!p.semSaldo)
+
+    // A ordem é a das datas, não a de cadastro: compra antiga registrada depois entra antes da venda.
+    ativo.compras.append(op(10, 10, dia(1, hora: 8)))
+    p = posicao(ativo)
+    #expect(p.precoMedio == 20)        // (10 × 10 + 10 × 20 + 10 × 30) / 30
+    #expect(p.realizado == 100)        // (40 − 20) × 5
+
+    // Venda total zera o custo; a recompra começa um preço médio novo e o realizado fica.
+    let recompra = Ativo(simbolo: "VALE3", cripto: false, compras: [op(10, 20, dia(1)), op(4, 50, dia(5))], vendas: [op(10, 30, dia(3))])
+    p = posicao(recompra)
+    #expect(p.quantidade == 4)
+    #expect(p.custo == 200)
+    #expect(p.precoMedio == 50)
+    #expect(p.realizado == 100)
+
+    // Mesmo dia: a compra conta antes da venda, mesmo gravada com hora depois.
+    let mesmoDia = Ativo(simbolo: "BTC", cripto: true, compras: [op(2, 100, dia(7, hora: 18))], vendas: [op(2, 90, dia(7, hora: 9))])
+    p = posicao(mesmoDia)
+    #expect(p == Posicao(quantidade: 0, custo: 0, realizado: -20, semSaldo: false))
+
+    // Arredondamento: vender 0,3 de 0,1 + 0,2 zera a posição, sem sobra nem venda sem saldo.
+    let fracao = Ativo(simbolo: "ETH", cripto: true, compras: [op(0.1, 10, dia(1)), op(0.2, 10, dia(1))], vendas: [op(0.3, 20, dia(2))])
+    p = posicao(fracao)
+    #expect(p.quantidade == 0 && p.custo == 0 && !p.semSaldo)
+
+    // Venda sem saldo (JSON editado à mão) não deixa quantidade negativa.
+    p = posicao(Ativo(simbolo: "AAPL", cripto: false, vendas: [op(5, 10, dia(1))]))
+    #expect(p.semSaldo && p.quantidade == 0 && p.realizado == 0)
+}
+
+@Test func validacaoDeVenda() {
+    let ativo = Ativo(simbolo: "PETR4", cripto: false, compras: [op(10, 20, dia(2))], vendas: [op(6, 30, dia(10))])
+    let agora = dia(20)
+    let problema = { (venda: Bool, quantidade: Double, data: Date) in
+        ativo.problema(venda: venda, quantidade: quantidade, data: data, agora: agora, calendario: utc)
+    }
+    #expect(ativo.maximoVenda(em: dia(1), calendario: utc) == 0)   // antes da compra
+    #expect(ativo.maximoVenda(em: dia(2), calendario: utc) == 4)   // no dia da compra; a venda do dia 10 já usa 6
+    #expect(ativo.maximoVenda(em: dia(5), calendario: utc) == 4)
+    #expect(ativo.maximoVenda(em: dia(15), calendario: utc) == 4)
+
+    #expect(problema(true, 4, dia(15)) == nil)
+    #expect(problema(true, 5, dia(15)) == .semSaldo(disponivel: 4))
+    #expect(problema(true, 1, dia(1)) == .semSaldo(disponivel: 0))
+    // Vender 5 no dia 5 deixaria a venda do dia 10 sem saldo.
+    #expect(problema(true, 5, dia(5)) == .semSaldo(disponivel: 4))
+
+    // Data no futuro, por dia: hoje mais tarde ainda vale.
+    #expect(problema(false, 1, dia(20, hora: 23)) == nil)
+    #expect(problema(false, 1, dia(21, hora: 1)) == .dataFutura)
+    #expect(problema(true, 1, dia(21)) == .dataFutura)
+
+    // Apagar a compra deixaria a venda sem saldo; apagar a venda pode.
+    #expect(!ativo.podeApagar(ativo.compras[0]))
+    #expect(ativo.podeApagar(ativo.vendas[0]))
+    var duas = ativo
+    duas.compras.append(op(10, 25, dia(3)))
+    #expect(duas.podeApagar(duas.compras[0]))
+}
+
+// O carteira.json de antes das vendas: só a lista de ativos.
+@Test func arquivoAntigoContinuaLegivel() throws {
+    let antigo = #"[{"simbolo":"PETR4","cripto":false,"compras":[{"id":"6F1C1D2E-0000-4000-8000-000000000001","quantidade":100,"preco":48.5,"data":"2026-09-10T12:00:00Z"}]}]"#
+    let lido = try Arquivo.ler(Data(antigo.utf8))
+    #expect(lido.precoMedioBinance.isEmpty)
+    let ativo = try #require(lido.ativos.first)
+    #expect(lido.ativos.count == 1)
+    #expect(ativo.simbolo == "PETR4" && !ativo.cripto)
+    #expect(ativo.vendas.isEmpty)
+    #expect(ativo.compras == [Operacao(id: UUID(uuidString: "6F1C1D2E-0000-4000-8000-000000000001")!,
+                                       quantidade: 100, preco: 48.5, data: dia(10))])
+    #expect(ativo.posicao.custo == 4850)
+
+    // Formato novo: grava e lê de volta igual, com vendas e preço médio da Binance.
+    let novo = Arquivo(ativos: [Ativo(simbolo: "PETR4", cripto: false, compras: ativo.compras, vendas: [op(40, 52, dia(12))])],
+                       precoMedioBinance: ["BTC": 350_000.5])
+    #expect(try Arquivo.ler(novo.dados()) == novo)
+    // Arquivo estragado dá erro: o app então não salva por cima.
+    #expect(throws: (any Error).self) { try Arquivo.ler(Data("[{\"simbolo\": 1}]".utf8)) }
 }
 
 @Test func conversaoDeMoedas() {
@@ -36,8 +143,8 @@ import Testing
 }
 
 @Test func totalUnicoConvertido() throws {
-    let petr = Ativo(simbolo: "PETR4", cripto: false, compras: [Compra(quantidade: 10, preco: 20, data: .now)])
-    let aapl = Ativo(simbolo: "AAPL", cripto: false, compras: [Compra(quantidade: 2, preco: 15, data: .now)])
+    let petr = Ativo(simbolo: "PETR4", cripto: false, compras: [Operacao(quantidade: 10, preco: 20, data: .now)])
+    let aapl = Ativo(simbolo: "AAPL", cripto: false, compras: [Operacao(quantidade: 2, preco: 15, data: .now)])
     let linhas = [
         Linha(ativo: petr, quantidade: 10, custo: 200, cotacao: Cotacao(preco: 30, variacao: 0.25, moeda: "BRL")),
         Linha(ativo: Ativo(simbolo: "BTC", cripto: true), quantidade: 0.5, custo: nil, cotacao: Cotacao(preco: 100, variacao: 0, moeda: "BRL")),
@@ -53,20 +160,49 @@ import Testing
     #expect(brl.hoje == 80)               // (300 − 300 / 1,25) + (100 − 100 / 1,25)
     #expect(brl.hojePct == 80.0 / 370)
     #expect(brl.custo == 350)             // 200 + 30 × 5; Binance sem custo fica fora do lucro
-    #expect(brl.lucro.lucro == 50)        // (300 − 200) + (100 − 150)
-    #expect(brl.lucro.percentual == 50.0 / 350)
+    #expect(brl.aberto.lucro == 50)       // (300 − 200) + (100 − 150)
+    #expect(brl.aberto.percentual == 50.0 / 350)
 
     let usd = try #require(somar(linhas, em: "USD", cambio: snapshot.cambio))
     #expect(usd.patrimonio == 90)         // 450 / 5
     #expect(usd.hoje == 16)
-    #expect(usd.lucro.lucro == 10)
-    #expect(usd.lucro.percentual == brl.lucro.percentual)  // o câmbio não muda o percentual
+    #expect(usd.aberto.lucro == 10)
+    #expect(usd.aberto.percentual == brl.aberto.percentual)  // o câmbio não muda o percentual
 
     // Sem o câmbio do dólar, AAPL não entra na conta: em vez de um total errado, nenhum.
     #expect(somar(linhas, em: "BRL", cambio: [:]) == nil)
     #expect(somar(linhas, em: "EUR", cambio: ["EUR": 6]) == nil)
     // Tudo em reais e exibição em reais não precisa de câmbio.
     #expect(somar(Array(linhas.prefix(3)), em: "BRL", cambio: [:])?.patrimonio == 350)
+}
+
+@Test func realizadoNoTotalENaLinha() throws {
+    let usd = Cotacao(preco: 10, variacao: 0, moeda: "USD")
+    // Posição zerada em dólar: só o realizado entra, convertido.
+    let encerrada = Linha(ativo: Ativo(simbolo: "AAPL", cripto: false), quantidade: 0, custo: 0, cotacao: usd, realizado: 20)
+    // Venda parcial em reais: em aberto e realizado separados.
+    let parcial = Linha(ativo: Ativo(simbolo: "PETR4", cripto: false), quantidade: 15, custo: 375,
+                        cotacao: Cotacao(preco: 30, variacao: 0, moeda: "BRL"), realizado: 75)
+    // Saldo da Binance com preço médio entra no em aberto.
+    let binance = Linha(ativo: Ativo(simbolo: "BTC", cripto: true), quantidade: 0.5, custo: 0.5 * 80,
+                        cotacao: Cotacao(preco: 100, variacao: 0, moeda: "BRL"), binance: true)
+    let cambio: Cambio = ["USD": 5]
+
+    let t = try #require(somar([encerrada, parcial, binance], em: "BRL", cambio: cambio))
+    #expect(t.patrimonio == 500)          // 15 × 30 + 0,5 × 100
+    #expect(t.custo == 415)
+    #expect(t.aberto.lucro == 85)         // (450 − 375) + (50 − 40)
+    #expect(t.realizado == 175)           // 20 × 5 + 75
+    // Sem câmbio do dólar, nem o realizado da AAPL entra: nada de total errado.
+    #expect(somar([encerrada, parcial], em: "BRL", cambio: [:]) == nil)
+
+    // A linha passa pela mesma conta; sem câmbio fica na moeda do ativo.
+    let linha = resumir(encerrada, em: "BRL", cambio: cambio)
+    #expect(linha.moeda == "BRL" && linha.realizado == 100 && linha.patrimonio == 0)
+    let semCambio = resumir(encerrada, em: "BRL", cambio: [:])
+    #expect(semCambio.moeda == "USD" && semCambio.realizado == 20)
+    #expect(resumir(parcial, em: "BRL", cambio: [:]).aberto.lucro == 75)
+    #expect(binance.id == "binance:c:BTC" && parcial.id == "a:PETR4")
 }
 
 @Test func cambioVelho() {
