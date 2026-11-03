@@ -1,0 +1,75 @@
+# StockNotch
+
+A native macOS widget that lives in the MacBook notch and shows live stock and crypto prices, daily change and your portfolio's profit and loss. Hover the notch to expand it; move away and it tucks back in.
+
+Built with SwiftUI and AppKit, no third-party dependencies.
+
+## Features
+
+- **Notch widget**: a black panel that blends with the notch, cycles through your assets (`PETR4 ▲ 1.20%`) and expands on hover into a full portfolio view. On displays without a notch it becomes a small pill centered on the menu bar.
+- **Stocks and crypto**: Brazilian (B3) and US stocks via Yahoo Finance, crypto via the Binance public API. Prices refresh every 10 seconds.
+- **Profit and loss**: record your purchases and see average cost, P&L per asset and totals per currency, plus today's change for the whole portfolio.
+- **Binance account sync (read-only)**: connect an API key and your spot and Simple Earn Flexible balances show up automatically.
+- **Management window**: a native table with your assets, purchase history and the Binance connection.
+- **Accessibility**: changes are shown with arrows and signs, not just color, and animations respect *Reduce Motion*.
+
+## Requirements
+
+- macOS 15 (Sequoia) or later
+- Xcode 16 or later (Swift 6)
+
+## Build and run
+
+```bash
+git clone https://github.com/rodrigovixc/macOs-notch-ticker.git
+cd macOs-notch-ticker
+./build.sh
+open StockNotch.app
+```
+
+`build.sh` compiles a release build, wraps it in an app bundle and signs it locally (ad-hoc). Drag the app to `/Applications` and add it under **System Settings → General → Login Items** to start it with your Mac.
+
+To work on the code, open `Package.swift` in Xcode.
+
+## Connecting Binance
+
+1. On Binance, go to **Account → API Management** and create a key with **only "Enable Reading"** checked.
+2. In the app, open the management window (the sliders icon in the notch) → **Binance**, and paste the API Key and Secret Key.
+
+The app checks the key's permissions and refuses any key that can trade, transfer or withdraw. The secret is stored in the macOS Keychain, never in plain files.
+
+## Data sources and limitations
+
+| Market | Source | Delay |
+|---|---|---|
+| B3 (e.g. `PETR4`, `VALE3`) | Yahoo Finance (unofficial endpoint) | ~15 min (real-time B3 data is paid) |
+| US stocks (e.g. `AAPL`) | Yahoo Finance (unofficial endpoint) | real time |
+| Crypto (e.g. `BTC`, `ETH`) | Binance public API, BRL pairs (falls back to USDT × USDT/BRL) | real time |
+
+- The Yahoo endpoint is unofficial and may change without notice.
+- P&L is calculated only for purchases you record. Binance balances count toward your total value and today's change, but not toward P&L, because they have no cost basis.
+- The interface is currently in Brazilian Portuguese.
+
+## Where data is stored
+
+- Portfolio: `~/Library/Application Support/StockNotch/carteira.json` (readable JSON, easy to back up)
+- Binance secret: macOS Keychain, service `io.github.rodrigovixc.stocknotch.binance`
+
+## Tests
+
+```bash
+swift test
+```
+
+The tests cover average-cost P&L, per-currency totals (including Binance balances), symbol normalization, decimal parsing (`1.234,56` and `0.5`) and Binance request signing, checked against the example in the Binance documentation.
+
+## Project structure
+
+```
+Sources/StockNotch/
+├── App.swift       # app entry point, formatting helpers, shared UI pieces
+├── Notch.swift     # notch panel, hover tracking, collapsed/expanded views
+├── Painel.swift    # management window: assets table, purchases, Binance
+├── Carteira.swift  # portfolio model, persistence, quotes, P&L math
+└── Binance.swift   # signed read-only API calls and Keychain storage
+```
