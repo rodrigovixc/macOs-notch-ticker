@@ -118,7 +118,7 @@ struct NotchView: View {
     @State private var indice = 0
 
     private let orelha: CGFloat = 80
-    private let larguraAberta: CGFloat = 420
+    private let larguraAberta: CGFloat = 480  // cabe o minigráfico ao lado do preço
     private let maximoLinhas = 10
 
     private var animacao: Animation {
@@ -426,6 +426,7 @@ struct LinhaNotch: View {
             }
             Spacer(minLength: 8)
             if let c = linha.cotacao {
+                MiniGrafico(pontos: carteira.serie(linha), cotacao: c)
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(dinheiro(c.preco, c.moeda, oculto: false))
                         .font(.system(size: 13, weight: .medium))

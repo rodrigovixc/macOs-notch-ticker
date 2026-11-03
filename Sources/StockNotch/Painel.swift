@@ -48,7 +48,7 @@ struct PainelView: View {
             case .ajustes: AjustesTela()
             }
         }
-        .frame(minWidth: 880, minHeight: 480)
+        .frame(minWidth: 940, minHeight: 480)
         // Controles nativos (DatePicker etc.) seguem o idioma do app, não o do sistema.
         .environment(\.locale, Ajustes.atual.idioma.locale)
     }
@@ -161,6 +161,10 @@ struct CarteiraTela: View {
             }
             .width(min: 90, ideal: 120)
             .alignment(.trailing)
+            TableColumn(tr("Gráfico", "Chart")) { l in
+                if let c = l.cotacao { MiniGrafico(pontos: carteira.serie(l), cotacao: c) }
+            }
+            .width(64)
             TableColumn(tr("Dia", "Day")) { l in
                 if let c = l.cotacao { Pilula(fracao: c.variacao) }
             }

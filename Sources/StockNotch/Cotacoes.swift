@@ -66,6 +66,8 @@ struct Fontes {
     var acoes: [String: Cotacao] = [:]   // por ativo, na moeda dele (Yahoo)
     var cripto: [String: Cotacao] = [:]  // por ativo, em dólares (pares em USDT) ou em reais (moeda sem par em USDT)
     var cambio: [String: Cotacao] = [:]  // reais por dólar e por euro (Yahoo, ou a AwesomeAPI na falha dele)
+    var series: [String: Serie] = [:]    // desenho do dia por ativo, buscado a cada 60 s (ver Grafico.swift)
+    var serieDolar: [Ponto] = []         // reais por dólar ao longo do dia, para a cripto em reais
 }
 
 // Cotações e câmbio montados de uma vez, para todas as telas e todos os totais baterem entre si.
@@ -77,6 +79,8 @@ struct Snapshot {
     var criptoSemCambio: Set<String> = []  // cripto sem dólar em dia: fica sem preço em reais
     var em: Date?                          // quando foi montado: é o "agora" das regras de idade
     var atualizado: Date?                  // o último dado que chegou da rede (os preços fixos não contam)
+    var series: [String: Serie] = [:]      // como veio da fonte; serie(_:ate:) ajusta à cotação mostrada
+    var serieDolar: [Ponto] = []
 }
 
 extension Snapshot {
@@ -85,7 +89,7 @@ extension Snapshot {
         let emDia = fontes.cambio.filter { !$0.value.velha(agora: agora) }
         let todas = Array(fontes.acoes.values) + Array(fontes.cripto.values) + Array(fontes.cambio.values)
         self.init(cotacoes: fontes.acoes, cambio: emDia.mapValues(\.preco), cambioEm: fontes.cambio.mapValues(\.recebida),
-                  em: agora, atualizado: todas.map(\.recebida).max())
+                  em: agora, atualizado: todas.map(\.recebida).max(), series: fontes.series, serieDolar: fontes.serieDolar)
         var cripto = fontes.cripto
         for (moeda, emMoeda) in Fonte.fixas {
             cripto[Ativo(simbolo: moeda, cripto: true).id] = Cotacao(preco: 1, variacao: 0, moeda: emMoeda, em: agora, recebida: agora, fixa: true)
@@ -109,11 +113,17 @@ extension Snapshot {
     func faltaCambio(_ linha: Linha) -> Bool { linha.cotacao == nil && criptoSemCambio.contains(linha.ativo.id) }
 }
 
-// Resposta do chart do Yahoo, só o meta.
+// Resposta do chart do Yahoo: o meta (a cotação) e as barras (a série do minigráfico, ver Grafico.swift).
 struct RespostaYahoo: Decodable {
     let chart: Chart
     struct Chart: Decodable { let result: [Item]? }
-    struct Item: Decodable { let meta: Meta }
+    struct Item: Decodable {
+        let meta: Meta
+        let timestamp: [TimeInterval]?
+        let indicators: Indicadores?
+    }
+    struct Indicadores: Decodable { let quote: [Barras] }
+    struct Barras: Decodable { let close: [Double?] }  // null na barra sem negócio
     struct Meta: Decodable {
         let regularMarketPrice: Double
         let previousClose: Double?
@@ -163,11 +173,12 @@ enum Fonte {
     }
 
     // API pública não oficial do Yahoo, sem chave. B3 com 15 min de atraso (tempo real da B3 só pago).
-    private static func yahoo(_ simbolo: String) async throws -> Cotacao {
+    static func chart(_ simbolo: String, _ consulta: String = "range=1d") async throws -> RespostaYahoo {
         let caminho = simbolo.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? simbolo
-        let r: RespostaYahoo = try await baixar("https://query1.finance.yahoo.com/v8/finance/chart/\(caminho)?range=1d")
-        return try r.cotacao()
+        return try await baixar("https://query1.finance.yahoo.com/v8/finance/chart/\(caminho)?\(consulta)")
     }
+
+    private static func yahoo(_ simbolo: String) async throws -> Cotacao { try await chart(simbolo).cotacao() }
 
     // Moedas de preço fixo, sem fonte, e a moeda em que valem 1: o real, e o USDT, que vale como dólar
     // (como em todos os pares em USDT, embora fique ~0,15% acima dele).

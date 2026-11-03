@@ -170,6 +170,9 @@ final class Carteira {
     @ObservationIgnored private var fontes = Fontes()
     @ObservationIgnored private var fila = Fila<Cotacao>()
     @ObservationIgnored private var stream: StreamBinance?
+    @ObservationIgnored private var seriesEm = Date.distantPast
+    @ObservationIgnored private var seriesPedidas: Set<String> = []
+    @ObservationIgnored private var buscandoSeries = false
 
     // JSON legível, dá pra fazer backup ou editar à mão
     let arquivo = URL.applicationSupportDirectory.appending(path: "StockNotch/carteira.json")
@@ -194,6 +197,8 @@ final class Carteira {
     // Do snapshot, com a cripto em dólar se é a moeda escolhida: trocar a moeda troca na hora, sem esperar o ciclo.
     func cotacao(_ ativo: Ativo) -> Cotacao? { snapshot.cotacao(ativo, moeda: moeda) }
     func faltaCambio(_ linha: Linha) -> Bool { snapshot.faltaCambio(linha) }
+    // O minigráfico termina na cotação da própria linha: o último ponto é o preço ao lado dele.
+    func serie(_ linha: Linha) -> [Ponto]? { linha.cotacao.flatMap { snapshot.serie(linha.ativo, ate: $0) } }
 
     var total: Total? { semCambio.isEmpty ? somar(linhas + linhasBinance, em: moeda, cambio: snapshot.cambio) : nil }
 
@@ -248,6 +253,7 @@ final class Carteira {
         ativos.removeAll { $0.id == ativo.id }
         fontes.acoes[ativo.id] = nil
         fontes.cripto[ativo.id] = nil
+        fontes.series[ativo.id] = nil
         publicar()
         salvar()
     }
@@ -352,6 +358,37 @@ final class Carteira {
         fontes.cambio.merge(novoCambio) { $1 }
         // Só avisa dos ativos manuais; moeda da Binance sem cotação só some da lista.
         falhas = Set(resultados.filter { $0.1 == nil }.map(\.0.id)).intersection(ativos.map(\.id))
+        publicar()
+        // À parte: o próximo ciclo de cotações não espera pelas séries.
+        Task { await atualizarSeries() }
+    }
+
+    // Séries a cada 60 s, só do que aparece na tela (a poeira da Binance não). Ativo novo (adicionado, ou saldo novo
+    // na Binance) não espera a volta. Falhou? Fica a anterior, que o ajuste corta quando o dia vira.
+    private func atualizarSeries() async {
+        var vistos = Set<String>()
+        let pedidos = (ativos + linhasBinance.map(\.ativo)).compactMap { a -> (ativo: Ativo, emReais: Bool)? in
+            guard vistos.insert(a.id).inserted else { return nil }
+            guard a.cripto else { return (a, false) }
+            // Cripto no par de onde veio a cotação; sem cotação ainda (ou preço fixo), nada a desenhar.
+            return fontes.cripto[a.id].map { (a, $0.moeda == "BRL") }
+        }
+        let ids = Set(pedidos.map(\.ativo.id))
+        guard !buscandoSeries, Date.now.timeIntervalSince(seriesEm) >= 60 || !ids.isSubset(of: seriesPedidas) else { return }
+        buscandoSeries = true
+        seriesEm = .now
+        seriesPedidas = ids
+        let comDolar = pedidos.contains { $0.ativo.cripto && !$0.emReais }
+        async let dolar = comDolar ? (try? Fonte.serieYahoo("USDBRL=X")) : nil
+        let novas = await withTaskGroup(of: (String, Serie?).self) { grupo in
+            for p in pedidos { grupo.addTask { (p.ativo.id, try? await Fonte.serie(p.ativo, emReais: p.emReais)) } }
+            var r: [(String, Serie?)] = []
+            for await item in grupo { r.append(item) }
+            return r
+        }
+        for case let (id, serie?) in novas { fontes.series[id] = serie }
+        if let d = await dolar { fontes.serieDolar = d.pontos }
+        buscandoSeries = false
         publicar()
     }
 
