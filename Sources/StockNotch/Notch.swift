@@ -317,8 +317,14 @@ struct NotchView: View {
             let moedas = carteira.semCambio.joined(separator: ", ")
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text(tr("Total indisponível: falta o câmbio de \(moedas) para \(carteira.moeda).",
-                        "Total unavailable: no exchange rate from \(moedas) to \(carteira.moeda)."))
+                // Câmbio velho não entra no total: melhor nenhum do que um que mistura instantes diferentes.
+                if let parado = carteira.cambioParado {
+                    Text(tr("Total indisponível: o câmbio de \(moedas) para \(carteira.moeda) não atualiza desde \(momento(parado)).",
+                            "Total unavailable: the \(moedas) to \(carteira.moeda) exchange rate hasn't updated since \(momento(parado))."))
+                } else {
+                    Text(tr("Total indisponível: falta o câmbio de \(moedas) para \(carteira.moeda).",
+                            "Total unavailable: no exchange rate from \(moedas) to \(carteira.moeda)."))
+                }
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
@@ -348,21 +354,26 @@ struct NotchView: View {
         }
     }
 
-    @ViewBuilder private var rodape: some View {
+    private var aviso: String? {
+        if let erro = carteira.erroArquivo { return mensagem(erro) }
+        if let erro = carteira.erroBinance { return "Binance: \(mensagem(erro))" }
         let semCotacao = carteira.simbolosSemCotacao.joined(separator: ", ")
-        let aviso = carteira.erroArquivo.map { mensagem($0) }
-            ?? carteira.erroBinance.map { "Binance: \(mensagem($0))" }
-            ?? (semCotacao.isEmpty ? nil : tr("Sem cotação: \(semCotacao)", "No quote: \(semCotacao)"))
-            ?? carteira.cambioVelho.map { tr("Câmbio sem atualizar desde \(quando($0, hora: .shortened))",
-                                             "Exchange rate not updated since \(quando($0, hora: .shortened))") }
+        if !semCotacao.isEmpty { return tr("Sem cotação: \(semCotacao)", "No quote: \(semCotacao)") }
+        guard let paradas = carteira.paradas else { return nil }
+        let desde = momento(paradas.desde, agora: carteira.agora)
+        let lista = paradas.simbolos.joined(separator: ", ")
+        return tr("Sem atualizar desde \(desde): \(lista)", "Not updated since \(desde): \(lista)")
+    }
+
+    @ViewBuilder private var rodape: some View {
         HStack(spacing: 6) {
             if let aviso {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Text(aviso).lineLimit(2)
             } else if let hora = carteira.atualizadoEm {
+                // A idade de cada cotação fica no selo da linha (ao vivo, 15 min, fechado).
                 Image(systemName: "arrow.clockwise")
-                Text(tr("Atualizado às \(quando(hora, hora: .standard)) · B3 com 15 min de atraso",
-                        "Updated at \(quando(hora, hora: .standard)) · B3 delayed 15 min"))
+                Text(tr("Atualizado às \(quando(hora, hora: .standard))", "Updated at \(quando(hora, hora: .standard))"))
             }
         }
         .font(.system(size: 10.5))
@@ -399,7 +410,14 @@ struct LinhaNotch: View {
         HStack(spacing: 10) {
             Monograma(ativo: linha.ativo)
             VStack(alignment: .leading, spacing: 1) {
-                Text(linha.ativo.simbolo).font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 6) {
+                    Text(linha.ativo.simbolo).font(.system(size: 13, weight: .semibold))
+                    if let c = linha.cotacao {
+                        SeloCotacao(cotacao: c, agora: carteira.agora)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Text(situacao)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -432,6 +450,8 @@ struct LinhaNotch: View {
                     .frame(width: 74, alignment: .trailing)
             } else if falhou {
                 Text(tr("sem cotação", "no quote")).font(.system(size: 11)).foregroundStyle(.secondary)
+            } else if carteira.faltaCambio(linha) {
+                Text(tr("sem câmbio", "no exchange rate")).font(.system(size: 11)).foregroundStyle(.secondary)
             } else {
                 ProgressView().controlSize(.small)
             }

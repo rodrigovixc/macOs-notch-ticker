@@ -11,6 +11,8 @@ struct StockNotchApp: App {
     }
 }
 
+// Ações e câmbio a cada 10 s: cerca de um pedido por símbolo a cada 10 s é o que o Yahoo aguenta sem 429.
+// Cripto chega pelo stream da Binance; o ciclo só a busca quando o stream não trouxe.
 let intervalo: Duration = .seconds(10)
 
 @MainActor
@@ -23,10 +25,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.setActivationPolicy(.accessory)  // sem ícone no Dock, como os apps de notch
         notch = NotchPanel(carteira: carteira) { [weak self] in self?.abrirPainel() }
         if carteira.ativos.isEmpty && !carteira.binanceConectada { abrirPainel() }
+        // De início a início: o tempo da busca não se soma aos 10 s.
         Task {
             while true {
+                let inicio = ContinuousClock.now
                 await carteira.atualizar()
-                try? await Task.sleep(for: intervalo)
+                try? await Task.sleep(until: inicio + intervalo)
+            }
+        }
+        // Sem rede o ciclo leva até ~30 s; o "agora" dos selos não pode esperar por ele.
+        Task {
+            while true {
+                try? await Task.sleep(for: .seconds(2))
+                carteira.envelhecer()
             }
         }
     }
@@ -82,6 +93,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     instante.formatted(Date.FormatStyle(date: data, time: hora, locale: idioma.locale))
 }
 
+// Só a hora quando é de hoje; de outro dia vai com a data (a cotação de sexta vista no sábado).
+@MainActor func momento(_ instante: Date, agora: Date = .now, segundos: Bool = false) -> String {
+    let hora: Date.FormatStyle.TimeStyle = segundos ? .standard : .shortened
+    return Calendar.current.isDate(instante, inSameDayAs: agora) ? quando(instante, hora: hora) : quando(instante, data: .abbreviated, hora: hora)
+}
+
 func cor(_ valor: Double) -> Color {
     valor > 0 ? .green : valor < 0 ? .red : .secondary
 }
@@ -135,6 +152,66 @@ struct Pilula: View {
         .background(cor(fracao).opacity(0.16), in: Capsule())
         .accessibilityElement()
         .accessibilityLabel(tr("Variação \(pct(fracao))", "Change \(pct(fracao))"))
+    }
+}
+
+// Idade da cotação em poucas letras ("ao vivo", "15 min", "fechado" ou o horário); parada, com o alerta.
+// O texto completo vai para o VoiceOver e para a dica.
+struct SeloCotacao: View {
+    let cotacao: Cotacao
+    let agora: Date
+
+    var body: some View {
+        let selo = cotacao.selo(agora: agora)
+        // Preço fixo (BRL, USDT) não tem idade: nada de selo, muito menos "ao vivo".
+        if selo != .fixo {
+            rotulo(selo)
+        }
+    }
+
+    private func rotulo(_ selo: Selo) -> some View {
+        HStack(spacing: 3) {
+            switch selo {
+            case .aoVivo:
+                Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.green)
+                Text(tr("ao vivo", "live"))
+            case .atraso(let atraso):
+                Image(systemName: "clock")
+                Text("\(Int(atraso / 60)) min")
+            case .fechado:
+                Text(tr("fechado", "closed"))
+            case .velho(let desde):
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(momento(desde, agora: agora))
+            case .horario(let em):
+                Text(momento(em, agora: agora))
+            case .fixo:
+                EmptyView()
+            }
+        }
+        .lineLimit(1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(descricao(selo))
+        .help(descricao(selo))
+    }
+
+    private func descricao(_ selo: Selo) -> String {
+        let hora = momento(cotacao.em, agora: agora, segundos: true)
+        switch selo {
+        case .aoVivo:
+            return tr("Ao vivo, cotação das \(hora)", "Live, quote from \(hora)")
+        case .atraso(let atraso):
+            return tr("Fonte com \(Int(atraso / 60)) min de atraso, cotação das \(hora)", "Source delayed \(Int(atraso / 60)) min, quote from \(hora)")
+        case .fechado:
+            return tr("Mercado fechado, última cotação das \(hora)", "Market closed, last quote from \(hora)")
+        case .velho(let desde):
+            return tr("Sem atualizar desde \(momento(desde, agora: agora)), cotação das \(hora)",
+                      "Not updated since \(momento(desde, agora: agora)), quote from \(hora)")
+        case .horario:
+            return tr("Cotação das \(hora)", "Quote from \(hora)")
+        case .fixo:
+            return tr("Preço fixo", "Fixed price")
+        }
     }
 }
 

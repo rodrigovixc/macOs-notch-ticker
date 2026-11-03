@@ -122,20 +122,25 @@ struct CarteiraTela: View {
             }
             .width(min: 60, ideal: 70)
             .alignment(.trailing)
-            // Preço médio e cotação na moeda do ativo; valor e resultado na moeda escolhida.
+            // Preço médio na moeda das compras e cotação na do ativo; valor e resultado na moeda escolhida.
             TableColumn(tr("Preço médio", "Avg. Price")) { l in
-                Text(l.quantidade > 0 ? dinheiro((l.custo ?? 0) / l.quantidade, l.moeda) : "—")
+                Text(l.quantidade > 0 ? dinheiro((l.custo ?? 0) / l.quantidade, l.moedaCusto) : "—")
             }
             .width(min: 80, ideal: 100)
             .alignment(.trailing)
             TableColumn(tr("Cotação", "Price")) { l in
                 if let c = l.cotacao {
-                    Text(dinheiro(c.preco, c.moeda))
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(dinheiro(c.preco, c.moeda))
+                        SeloCotacao(cotacao: c, agora: carteira.agora).font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if carteira.falhas.contains(l.ativo.id) {
+                    Text(tr("sem cotação", "no quote")).foregroundStyle(.secondary)
                 } else {
-                    Text(carteira.falhas.contains(l.ativo.id) ? tr("sem cotação", "no quote") : "…").foregroundStyle(.secondary)
+                    Text(carteira.faltaCambio(l) ? tr("sem câmbio", "no exchange rate") : "…").foregroundStyle(.secondary)
                 }
             }
-            .width(min: 80, ideal: 110)
+            .width(min: 90, ideal: 120)
             .alignment(.trailing)
             TableColumn(tr("Dia", "Day")) { l in
                 if let c = l.cotacao { Pilula(fracao: c.variacao) }
@@ -208,7 +213,7 @@ struct OperacoesFolha: View {
     var body: some View {
         // Lê da carteira a cada mudança: apagar ou registrar atualiza a lista na hora.
         let ativo = carteira.ativos.first { $0.id == id }
-        let moeda = carteira.cotacoes[id]?.moeda ?? ativo?.moedaPrevista ?? "BRL"
+        let moeda = carteira.linhas.first { $0.ativo.id == id }?.moedaCusto ?? "BRL"
         let lancamentos = Array((ativo?.lancamentos() ?? []).reversed())  // mais recentes primeiro
         VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -337,8 +342,9 @@ struct BinanceTela: View {
             if carteira.binanceConectada {
                 Section(tr("Saldos (spot e Simple Earn flexível)", "Balances (spot and Simple Earn Flexible)")) {
                     if carteira.linhasBinance.isEmpty {
+                        let poeira = carteira.moeda == "USD" ? "USD" : "BRL"  // a moeda da cotação de cripto (ver linhasDeSaldo)
                         Text(carteira.atualizadoEm == nil ? tr("Carregando…", "Loading…")
-                             : tr("Nenhum saldo acima de \(dinheiro(1, "BRL")).", "No balances above \(dinheiro(1, "BRL"))."))
+                             : tr("Nenhum saldo acima de \(dinheiro(1, poeira)).", "No balances above \(dinheiro(1, poeira))."))
                             .foregroundStyle(.secondary)
                     }
                     ForEach(carteira.linhasBinance) { l in
@@ -357,6 +363,8 @@ struct BinanceTela: View {
                                 }
                                 .frame(minWidth: 110, alignment: .trailing)
                                 Pilula(fracao: c.variacao)
+                            } else if carteira.faltaCambio(l) {
+                                Text(tr("sem câmbio", "no exchange rate")).foregroundStyle(.secondary)
                             }
                         }
                         .monospacedDigit()
@@ -572,8 +580,8 @@ struct AjustesTela: View {
                     }
                 }
             } footer: {
-                Text(tr("O preço de cada ativo fica na moeda dele (PETR4 em R$, AAPL em US$). Valor das posições, resultado e totais aparecem na moeda escolhida, pelo câmbio do Yahoo Finance. Os menus do sistema mudam de idioma na próxima vez que o app abrir.",
-                        "Each asset's price stays in its own currency (PETR4 in R$, AAPL in US$). Position value, return and totals are shown in the chosen currency, using Yahoo Finance exchange rates. System menus switch language the next time the app opens."))
+                Text(tr("O preço de cada ativo fica na moeda dele (PETR4 em R$, AAPL em US$; cripto em R$, ou em US$ com o dólar escolhido). Valor das posições, resultado e totais aparecem na moeda escolhida, pelo câmbio do Yahoo Finance (ou da AwesomeAPI, se o Yahoo falhar). Os menus do sistema mudam de idioma na próxima vez que o app abrir.",
+                        "Each asset's price stays in its own currency (PETR4 in R$, AAPL in US$; crypto in R$, or in US$ when dollars are chosen). Position value, return and totals are shown in the chosen currency, using Yahoo Finance exchange rates (or AwesomeAPI when Yahoo fails). System menus switch language the next time the app opens."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
