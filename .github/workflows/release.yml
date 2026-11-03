@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # build.sh compila em release, gera o ícone (sips/iconutil) e assina ad-hoc.
+      - name: Montar StockNotch.app
+        run: ./build.sh
+
+      # ditto preserva a assinatura e os atributos do bundle; zip comum não.
+      - name: Compactar
+        run: ditto -c -k --keepParent StockNotch.app "StockNotch-${GITHUB_REF_NAME}.zip"
+
+      - name: Criar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "StockNotch-${GITHUB_REF_NAME}.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --notes "> [!NOTE]
+          > StockNotch is ad-hoc signed (no Apple Developer ID) and built for Apple Silicon, so Gatekeeper blocks the first launch.
+          > Unzip and move StockNotch.app to /Applications, then right-click it → **Open**. On macOS 15+ use System Settings → Privacy & Security → **Open Anyway**.
+          > Or remove the quarantine flag: \`xattr -dr com.apple.quarantine /Applications/StockNotch.app\`
+          >
+          > O app é assinado ad-hoc: no primeiro uso, botão direito → **Abrir** (no macOS 15+: Ajustes do Sistema → Privacidade e Segurança → **Abrir Mesmo Assim**), ou rode o comando \`xattr\` acima."
