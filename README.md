@@ -14,7 +14,10 @@ Built with SwiftUI and AppKit, no third-party dependencies.
 - **Profit and loss**: record purchases and sales and see average cost, unrealized and realized P&L per asset and a single portfolio total (value, today's change, unrealized and realized return). Uses the average-cost method.
 - **Language and currency**: Brazilian Portuguese or English, and totals in BRL, USD or EUR (**Settings** in the management window). Each asset's price stays in its own currency (PETR4 in R$, AAPL in US$); position value, P&L and totals are converted with Yahoo Finance exchange rates fetched in the same refresh as the prices.
 - **Binance account sync (read-only)**: connect an API key and your spot and Simple Earn Flexible balances show up automatically. Enter your average purchase price per coin (in BRL) to include them in unrealized P&L.
-- **Management window**: a native table with your assets, transaction history (purchases and sales) and the Binance connection.
+- **Price alerts**: per asset, notify when the price is above or below a value (in the asset's own currency) or when the daily change reaches ±X%. Native macOS notifications, once per crossing.
+- **Privacy mode**: hides amounts and quantities (`R$ ••••`) in the notch and the management window, so you can share your screen; prices and percentages stay visible. Toggle it in **Settings** or from the notch's right-click menu.
+- **Open at login**: one switch in **Settings**, using the macOS login items service.
+- **Management window**: a native table with your assets, transaction history (purchases and sales), price alerts and the Binance connection.
 - **Accessibility**: changes are shown with arrows and signs, not just color, and animations respect *Reduce Motion*.
 
 ## Requirements
@@ -31,7 +34,9 @@ cd macOs-notch-ticker
 open StockNotch.app
 ```
 
-`build.sh` compiles a release build, wraps it in an app bundle and signs it locally (ad-hoc). Drag the app to `/Applications` and add it under **System Settings → General → Login Items** to start it with your Mac.
+`build.sh` compiles a release build, wraps it in an app bundle and signs it locally (ad-hoc). Drag the app to `/Applications` and turn on **Open at login** in **Settings** to start it with your Mac. If macOS asks for approval, the app says so and opens **System Settings → General → Login Items** for you.
+
+Open at login and notifications need the app bundle: when run with `swift run`, the switch is disabled and alerts don't notify.
 
 To work on the code, open `Package.swift` in Xcode.
 
@@ -66,9 +71,17 @@ The app checks the key's permissions and refuses any key that can trade, transfe
 - Crypto purchases and Binance average prices are entered in BRL. Crypto prices show in BRL, or in USD when USD is chosen. A coin without a USDT pair on Binance is priced from its BRL pair over REST every 10 seconds (not streamed); one with neither gets no price.
 - In English, use a period for decimals when entering purchases (`32.50`); a comma is accepted only as a thousands separator (`1,234.50`).
 
+### Price alerts
+
+- Open them from an asset's right-click menu (**Price Alerts…**) or the bell button in the toolbar. They exist for assets in the portfolio table; to set one on a coin that only comes from Binance, add it to the portfolio (without a purchase, it's just followed).
+- *Above* and *below* compare the price in the currency shown when the alert was created (PETR4 in R$, AAPL in US$, crypto in R$, or in US$ with dollars chosen). Changing the display currency later doesn't change an alert's target. *Daily change* fires when the day's change reaches the percentage up or down, with the same daily change the app shows.
+- Alerts are checked every time prices refresh (every 10 s for stocks, as they stream for crypto) while the app is running. Each one notifies once when the price crosses the value and re-arms only after the price moves back to the other side by at least 0.1% (0.1 points for daily change), so a price hovering on the target doesn't flood you with notifications. An alert created when the price is already past the value notifies right away. Whether it already fired is saved, so reopening the app doesn't repeat it.
+- macOS asks for notification permission when you create the first alert, not at launch. If notifications are turned off, the alerts window says so and opens System Settings.
+
 ## Where data is stored
 
-- Portfolio: `~/Library/Application Support/StockNotch/carteira.json` (readable JSON, easy to back up): your assets with their purchases and sales, plus the Binance average prices. Files from earlier versions (a plain list of assets) are still read and are saved in the new format on the next change.
+- Portfolio: `~/Library/Application Support/StockNotch/carteira.json` (readable JSON, easy to back up): your assets with their purchases, sales and price alerts, plus the Binance average prices. Files from earlier versions (a plain list of assets, or assets without alerts) are still read and are saved in the new format on the next change.
+- Settings (language, currency, privacy mode): the app's macOS user defaults. Open at login is kept by macOS itself.
 - Binance secret: macOS Keychain, service `io.github.rodrigovixc.stocknotch.binance`
 
 ## Tests
@@ -77,19 +90,20 @@ The app checks the key's permissions and refuses any key that can trade, transfe
 swift test
 ```
 
-The tests cover the Binance WebSocket messages (a real captured kline and the `serverShutdown` notice), Yahoo quotes with quote time, delay and trading period (real captured responses), the data-age rules (live, delayed, closed, stale, Yahoo's wrong B3 hours, holidays), frozen quotes and fixed prices, the snapshot with a single exchange rate (crypto converted like Google's `BTC-BRL`, stale rates left out, crypto in USD without a rate), the AwesomeAPI fallback (a real captured response), Binance balances without an exchange rate, tick grouping and reconnection waits (including silent connections), average-cost P&L with sales (several purchases, partial sale, full sale and buyback, same-day purchase and sale), sale validation, reading the old `carteira.json` format, realized P&L in totals, currency conversion and the single converted total (including Binance balances and missing exchange rates), symbol normalization, decimal parsing in both languages (`1.234,56`, `0.5`, `1,234.56`), translations, currency formatting per language, settings defaults and persistence, and Binance request signing, checked against the example in the Binance documentation.
+The tests cover price alert crossings (fires once, re-arms only past the margin, daily change both ways, already past on creation), the quote each alert is checked against (its own currency, not the display one), alerts saved in `carteira.json` (and files without them), privacy-mode masking and its setting, the Binance WebSocket messages (a real captured kline and the `serverShutdown` notice), Yahoo quotes with quote time, delay and trading period (real captured responses), the data-age rules (live, delayed, closed, stale, Yahoo's wrong B3 hours, holidays), frozen quotes and fixed prices, the snapshot with a single exchange rate (crypto converted like Google's `BTC-BRL`, stale rates left out, crypto in USD without a rate), the AwesomeAPI fallback (a real captured response), Binance balances without an exchange rate, tick grouping and reconnection waits (including silent connections), average-cost P&L with sales (several purchases, partial sale, full sale and buyback, same-day purchase and sale), sale validation, reading the old `carteira.json` format, realized P&L in totals, currency conversion and the single converted total (including Binance balances and missing exchange rates), symbol normalization, decimal parsing in both languages (`1.234,56`, `0.5`, `1,234.56`), translations, currency formatting per language, settings defaults and persistence, and Binance request signing, checked against the example in the Binance documentation.
 
 ## Project structure
 
 ```
 Sources/StockNotch/
 ├── App.swift       # app entry point, formatting helpers, shared UI pieces
-├── Ajustes.swift   # language and currency settings, tr() translation helper
+├── Ajustes.swift   # language, currency and privacy settings, tr() translation helper
 ├── Notch.swift     # notch panel, hover tracking, collapsed/expanded views
-├── Painel.swift    # management window: assets table, transactions, Binance, settings
+├── Painel.swift    # management window: assets table, transactions, alerts, Binance, settings
 ├── Carteira.swift  # portfolio model, persistence, totals, refresh cycle
 ├── Cotacoes.swift  # quotes and their age, snapshot, Yahoo and Binance REST
 ├── TempoReal.swift # Binance WebSocket stream, tick grouping, reconnection
 ├── Operacoes.swift # purchases and sales, average-cost position, sale validation
+├── Alertas.swift   # price alerts: crossing rule and native notifications
 └── Binance.swift   # signed read-only API calls and Keychain storage
 ```
