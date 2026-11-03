@@ -148,6 +148,8 @@ struct NotchView: View {
         }
         .contextMenu {
             Button(tr("Abrir painel…", "Open StockNotch…"), action: abrirPainel)
+            @Bindable var ajustes = Ajustes.atual
+            Toggle(tr("Modo privacidade", "Privacy Mode"), isOn: $ajustes.privacidade)
             Divider()
             Button(tr("Sair do StockNotch", "Quit StockNotch")) { NSApp.terminate(nil) }
         }
@@ -425,7 +427,7 @@ struct LinhaNotch: View {
             Spacer(minLength: 8)
             if let c = linha.cotacao {
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(dinheiro(c.preco, c.moeda))
+                    Text(dinheiro(c.preco, c.moeda, oculto: false))
                         .font(.system(size: 13, weight: .medium))
                         .contentTransition(.numericText())
                     // Preço na moeda do ativo; resultado e valor da posição na moeda escolhida, pela conta do total.

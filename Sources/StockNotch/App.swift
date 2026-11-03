@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct StockNotchApp: App {
@@ -16,13 +17,14 @@ struct StockNotchApp: App {
 let intervalo: Duration = .seconds(10)
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
     let carteira = Carteira()
     private var notch: NotchPanel?
     private var painel: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // sem ícone no Dock, como os apps de notch
+        if emPacote { UNUserNotificationCenter.current().delegate = self }
         notch = NotchPanel(carteira: carteira) { [weak self] in self?.abrirPainel() }
         if carteira.ativos.isEmpty && !carteira.binanceConectada { abrirPainel() }
         // De início a início: o tempo da busca não se soma aos 10 s.
@@ -65,17 +67,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
     }
+
+    // Com o painel aberto o app está ativo, e o macOS esconderia o alerta de preço: mostra mesmo assim.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification)
+        async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
+    // Clicar no alerta abre o painel: o app vive no notch e não teria janela para mostrar.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        await abrirPainel()
+    }
 }
 
 // MARK: - Formatação e peças visuais usadas no notch e no painel
 
 // Formatadores no idioma escolhido (pt_BR: R$ 1.234,50; en_US: R$1,234.50).
-@MainActor func dinheiro(_ valor: Double, _ moeda: String, sinal: Bool = false, idioma: Idioma = Ajustes.atual.idioma) -> String {
+// No modo privacidade os números somem e o símbolo e o sinal ficam (R$ ••••). Ocultar é o padrão, para nada
+// novo vazar: só a cotação de mercado, que não diz nada da carteira, passa oculto: false.
+@MainActor func dinheiro(_ valor: Double, _ moeda: String, sinal: Bool = false, oculto: Bool = Ajustes.atual.privacidade,
+                         idioma: Idioma = Ajustes.atual.idioma) -> String {
     // Cripto barata (ex.: R$ 0,000123) precisa de mais casas.
     var estilo = FloatingPointFormatStyle<Double>.Currency(code: moeda, locale: idioma.locale)
         .precision(.fractionLength(valor.magnitude < 1 && valor != 0 ? 2...6 : 2...2))
     if sinal { estilo = estilo.sign(strategy: .always()) }
-    return valor.formatted(estilo)
+    let texto = valor.formatted(estilo)
+    return oculto ? texto.replacing(#/\d[\d.,]*/#, with: "••••") : texto
 }
 
 @MainActor func pct(_ fracao: Double, sinal: Bool = true, idioma: Idioma = Ajustes.atual.idioma) -> String {
@@ -84,8 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     return fracao.formatted(estilo)
 }
 
-@MainActor func qtd(_ valor: Double, idioma: Idioma = Ajustes.atual.idioma) -> String {
-    valor.formatted(FloatingPointFormatStyle<Double>(locale: idioma.locale).precision(.fractionLength(0...8)))
+@MainActor func qtd(_ valor: Double, oculto: Bool = Ajustes.atual.privacidade, idioma: Idioma = Ajustes.atual.idioma) -> String {
+    oculto ? "••••" : valor.formatted(FloatingPointFormatStyle<Double>(locale: idioma.locale).precision(.fractionLength(0...8)))
 }
 
 @MainActor func quando(_ instante: Date, data: Date.FormatStyle.DateStyle = .omitted, hora: Date.FormatStyle.TimeStyle = .omitted,

@@ -6,6 +6,7 @@ struct Ativo: Codable, Identifiable, Equatable {
     var cripto: Bool
     var compras: [Operacao] = []
     var vendas: [Operacao] = []
+    var alertas: [Alerta] = []
     var id: String { (cripto ? "c:" : "a:") + simbolo }
 
     // PETR4 → PETR4.SA: ticker da B3 termina em número e o Yahoo pede o sufixo.
@@ -25,13 +26,14 @@ struct Ativo: Codable, Identifiable, Equatable {
 }
 
 extension Ativo {
-    // Campos novos são opcionais no JSON: o carteira.json de antes das vendas continua legível.
+    // Campos novos são opcionais no JSON: o carteira.json de antes das vendas e dos alertas continua legível.
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         simbolo = try c.decode(String.self, forKey: .simbolo)
         cripto = try c.decode(Bool.self, forKey: .cripto)
         compras = try c.decodeIfPresent([Operacao].self, forKey: .compras) ?? []
         vendas = try c.decodeIfPresent([Operacao].self, forKey: .vendas) ?? []
+        alertas = try c.decodeIfPresent([Alerta].self, forKey: .alertas) ?? []
     }
 }
 
@@ -266,6 +268,22 @@ final class Carteira {
         salvar()
     }
 
+    // O primeiro alerta é que pede a permissão de notificar (depois da resposta o sistema não pergunta de novo).
+    // Só entra depois dela: um alerta já atingido dispararia antes de poder notificar e não avisaria nunca.
+    func adicionar(_ alerta: Alerta, a ativo: Ativo) async {
+        await Notificacoes.pedirPermissao()
+        guard let i = ativos.firstIndex(where: { $0.id == ativo.id }) else { return }
+        ativos[i].alertas.append(alerta)
+        salvar()
+        conferirAlertas()
+    }
+
+    func remover(_ alerta: Alerta, de ativo: Ativo) {
+        guard let i = ativos.firstIndex(where: { $0.id == ativo.id }) else { return }
+        ativos[i].alertas.removeAll { $0.id == alerta.id }
+        salvar()
+    }
+
     // nil apaga: o saldo volta a contar só no patrimônio.
     func definirPrecoMedio(_ preco: Double?, para moeda: String) {
         precoMedioBinance[moeda] = preco
@@ -358,6 +376,25 @@ final class Carteira {
     // Monta tudo de uma vez a partir das fontes, com um câmbio só: as telas leem só daqui.
     private func publicar() {
         snapshot = Snapshot(fontes, agora: .now)
+        conferirAlertas()
+    }
+
+    // Cada alerta contra a cotação na moeda dele, a mesma das telas. Só grava quando algum muda de lado:
+    // o estado salvo evita avisar de novo ao reabrir o app.
+    private func conferirAlertas() {
+        var mudou = false
+        for i in ativos.indices {
+            for j in ativos[i].alertas.indices {
+                var alerta = ativos[i].alertas[j]
+                guard let c = snapshot.cotacao(para: alerta, de: ativos[i]) else { continue }
+                if alerta.conferir(c) { alerta.notificar(ativos[i].simbolo, c) }
+                if alerta != ativos[i].alertas[j] {
+                    ativos[i].alertas[j] = alerta
+                    mudou = true
+                }
+            }
+        }
+        if mudou { salvar() }
     }
 
     private func salvar() {

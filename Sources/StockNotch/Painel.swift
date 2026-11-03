@@ -1,4 +1,6 @@
+import ServiceManagement
 import SwiftUI
+import UserNotifications
 
 struct PainelView: View {
     enum Secao: CaseIterable, Identifiable {
@@ -58,6 +60,7 @@ struct CarteiraTela: View {
     @State private var adicionando = false
     @State private var registrando: Registro?
     @State private var vendoOperacoes: Ativo?
+    @State private var vendoAlertas: Ativo?
     @State private var removendo: Ativo?
 
     private var selecionado: Ativo? { carteira.ativos.first { $0.id == selecao } }
@@ -90,10 +93,16 @@ struct CarteiraTela: View {
                              "See the selected asset's purchases and sales (or double-click the row)"))
                     .disabled(selecionado == nil)
             }
+            ToolbarItem {
+                Button { vendoAlertas = selecionado } label: { Label(tr("Alertas", "Alerts"), systemImage: "bell") }
+                    .help(tr("Alertas de preço do ativo selecionado", "Price alerts for the selected asset"))
+                    .disabled(selecionado == nil)
+            }
         }
         .sheet(isPresented: $adicionando) { FormAdicionar(fixo: nil).environment(carteira) }
         .sheet(item: $registrando) { FormAdicionar(fixo: $0.ativo, venda: $0.venda).environment(carteira) }
         .sheet(item: $vendoOperacoes) { OperacoesFolha(id: $0.id).environment(carteira) }
+        .sheet(item: $vendoAlertas) { AlertasFolha(id: $0.id).environment(carteira) }
         .confirmationDialog(tr("Remover \(removendo?.simbolo ?? "")?", "Remove \(removendo?.simbolo ?? "")?"),
                             isPresented: .init(get: { removendo != nil }, set: { if !$0 { removendo = nil } }),
                             presenting: removendo) { ativo in
@@ -110,7 +119,17 @@ struct CarteiraTela: View {
                 HStack(spacing: 8) {
                     Monograma(ativo: l.ativo, tamanho: 22)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(l.ativo.simbolo).fontWeight(.semibold)
+                        HStack(spacing: 4) {
+                            Text(l.ativo.simbolo).fontWeight(.semibold)
+                            if !l.ativo.alertas.isEmpty {
+                                let n = l.ativo.alertas.count
+                                Image(systemName: "bell.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .help(tr("\(n) alerta(s) de preço", "\(n) price alert(s)"))
+                                    .accessibilityLabel(tr("\(n) alerta(s) de preço", "\(n) price alert(s)"))
+                            }
+                        }
                         Text(l.ativo.cripto ? tr("Cripto", "Crypto") : tr("Ação", "Stock")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -131,7 +150,7 @@ struct CarteiraTela: View {
             TableColumn(tr("Cotação", "Price")) { l in
                 if let c = l.cotacao {
                     VStack(alignment: .trailing, spacing: 0) {
-                        Text(dinheiro(c.preco, c.moeda))
+                        Text(dinheiro(c.preco, c.moeda, oculto: false))
                         SeloCotacao(cotacao: c, agora: carteira.agora).font(.caption).foregroundStyle(.secondary)
                     }
                 } else if carteira.falhas.contains(l.ativo.id) {
@@ -186,6 +205,7 @@ struct CarteiraTela: View {
                 Button(tr("Registrar compra…", "Record Purchase…")) { registrando = Registro(ativo: ativo, venda: false) }
                 Button(tr("Registrar venda…", "Record Sale…")) { registrando = Registro(ativo: ativo, venda: true) }
                     .disabled(ativo.posicao.quantidade <= 0)
+                Button(tr("Alertas de preço…", "Price Alerts…")) { vendoAlertas = ativo }
                 Divider()
                 Button(tr("Remover \(ativo.simbolo)", "Remove \(ativo.simbolo)"), role: .destructive) {
                     if ativo.compras.isEmpty && ativo.vendas.isEmpty { carteira.remover(ativo) } else { removendo = ativo }
@@ -290,6 +310,159 @@ struct OperacoesFolha: View {
     }
 }
 
+// Alertas de preço de um ativo: os que existem, um novo e se o macOS deixa notificar.
+struct AlertasFolha: View {
+    @Environment(Carteira.self) private var carteira
+    @Environment(\.dismiss) private var dismiss
+    let id: Ativo.ID
+    @State private var tipo = Alerta.Tipo.acima
+    @State private var texto = ""
+    @State private var autorizacao = UNAuthorizationStatus.notDetermined
+
+    private var idioma: Idioma { Ajustes.atual.idioma }
+
+    var body: some View {
+        // Lê da carteira a cada mudança: disparar, criar ou apagar atualiza a lista na hora.
+        let ativo = carteira.ativos.first { $0.id == id }
+        let cotacao = ativo.flatMap { carteira.cotacao($0) }
+        // A moeda do preço como a tabela mostra; fica gravada no alerta.
+        let moeda = carteira.linhas.first { $0.ativo.id == id }?.moeda ?? ativo?.moedaPrevista ?? "BRL"
+        let novo = valorDigitado.map { Alerta(tipo: tipo, valor: $0, moeda: moeda) }
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                if let ativo { Monograma(ativo: ativo, tamanho: 30) }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(ativo?.simbolo ?? "").font(.title3.weight(.semibold))
+                    Text(tr("Alertas de preço", "Price alerts")).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let cotacao {
+                    Text(dinheiro(cotacao.preco, cotacao.moeda, oculto: false)).monospacedDigit()
+                    Pilula(fracao: cotacao.variacao)
+                }
+            }
+            .padding([.horizontal, .top], 20)
+
+            Form {
+                Section(tr("Novo alerta", "New Alert")) {
+                    Picker(tr("Avisar quando", "Notify when"), selection: $tipo) {
+                        Text(tr("Preço acima de", "Price above")).tag(Alerta.Tipo.acima)
+                        Text(tr("Preço abaixo de", "Price below")).tag(Alerta.Tipo.abaixo)
+                        Text(tr("Variação do dia de ±", "Daily change of ±")).tag(Alerta.Tipo.variacao)
+                    }
+                    // Exemplo no formato do idioma, que é o que numero(_:idioma:) entende.
+                    let exemplo = tipo == .variacao ? tr("2,5", "2.5") : tr("55,20", "55.20")
+                    TextField(tipo == .variacao ? tr("Variação (%)", "Change (%)") : tr("Preço (\(moeda))", "Price (\(moeda))"), text: $texto,
+                              prompt: Text(exemplo))
+                        .onSubmit { adicionar(novo, a: ativo) }
+                    if !texto.isEmpty && novo == nil {
+                        Text(tr("Use um número maior que zero, como \(exemplo).", "Use a number greater than zero with a period for decimals, like \(exemplo)."))
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else if let novo, let cotacao, cotacao.moeda == moeda, novo.distancia(cotacao) >= 0 {
+                        Text(tr("A cotação já chegou lá: o aviso vem assim que você adicionar.", "The price is already there: you'll be notified as soon as you add it."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Spacer()
+                        Button(tr("Adicionar alerta", "Add Alert")) { adicionar(novo, a: ativo) }
+                            .disabled(novo == nil || ativo == nil)
+                    }
+                }
+
+                Section {
+                    if ativo?.alertas.isEmpty ?? true {
+                        Text(tr("Nenhum alerta.", "No alerts.")).foregroundStyle(.secondary)
+                    }
+                    ForEach(ativo?.alertas ?? []) { alerta in
+                        HStack(spacing: 8) {
+                            Image(systemName: alerta.tipo == .acima ? "arrow.up.right" : alerta.tipo == .abaixo ? "arrow.down.right" : "plusminus")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16)
+                                .accessibilityHidden(true)
+                            Text(alerta.descricao).monospacedDigit()
+                            Spacer()
+                            if alerta.disparado {
+                                Label(tr("Atingido", "Triggered"), systemImage: "bell.badge")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .help(tr("Já avisou; avisa de novo depois que a cotação voltar para o outro lado.",
+                                             "Already notified; notifies again after the price moves back to the other side."))
+                            }
+                            Button { if let ativo { carteira.remover(alerta, de: ativo) } } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help(tr("Apagar este alerta", "Delete this alert"))
+                                .accessibilityLabel(tr("Apagar alerta: \(alerta.descricao)", "Delete alert: \(alerta.descricao)"))
+                        }
+                    }
+                } header: {
+                    Text(tr("Alertas", "Alerts"))
+                } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        aviso
+                        Text(tr("Avisa uma vez quando a cotação cruza o valor, e de novo só depois que ela voltar para o outro lado. O preço é na moeda do ativo, como na tabela.",
+                                "Notifies once when the price crosses the value, and again only after it moves back to the other side. The price is in the asset's currency, as in the table."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .formStyle(.grouped)
+
+            HStack {
+                Spacer()
+                Button(tr("Fechar", "Close")) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding([.horizontal, .bottom], 20)
+        }
+        .frame(width: 480, height: 520)
+        .task { autorizacao = await Notificacoes.autorizacao() }
+        // Volta de Ajustes do Sistema com as notificações ligadas: o aviso some.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { autorizacao = await Notificacoes.autorizacao() }
+        }
+    }
+
+    private var valorDigitado: Double? {
+        guard let v = numero(texto, idioma: idioma), v > 0 else { return nil }
+        return tipo == .variacao ? v / 100 : v
+    }
+
+    // Sem permissão (ou fora do .app) o alerta continua contando, mas o aviso não aparece: melhor dizer.
+    @ViewBuilder private var aviso: some View {
+        if !emPacote {
+            Label(tr("Notificações só funcionam no StockNotch.app (monte com ./build.sh).", "Notifications only work in StockNotch.app (build it with ./build.sh)."),
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        } else if autorizacao == .denied {
+            HStack {
+                Label(tr("As notificações do StockNotch estão desligadas.", "StockNotch notifications are turned off."), systemImage: "bell.slash")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Spacer()
+                if let url = Notificacoes.ajustesDoSistema {
+                    Button(tr("Abrir Ajustes do Sistema…", "Open System Settings…")) { NSWorkspace.shared.open(url) }
+                        .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    // Limpa o campo antes de esperar a permissão: dois cliques não criam dois alertas.
+    private func adicionar(_ alerta: Alerta?, a ativo: Ativo?) {
+        guard let alerta, let ativo else { return }
+        texto = ""
+        Task {
+            await carteira.adicionar(alerta, a: ativo)
+            autorizacao = await Notificacoes.autorizacao()
+        }
+    }
+}
+
 struct BinanceTela: View {
     @Environment(Carteira.self) private var carteira
     @State private var chave = ""
@@ -344,7 +517,7 @@ struct BinanceTela: View {
                     if carteira.linhasBinance.isEmpty {
                         let poeira = carteira.moeda == "USD" ? "USD" : "BRL"  // a moeda da cotação de cripto (ver linhasDeSaldo)
                         Text(carteira.atualizadoEm == nil ? tr("Carregando…", "Loading…")
-                             : tr("Nenhum saldo acima de \(dinheiro(1, poeira)).", "No balances above \(dinheiro(1, poeira))."))
+                             : tr("Nenhum saldo acima de \(dinheiro(1, poeira, oculto: false)).", "No balances above \(dinheiro(1, poeira, oculto: false))."))
                             .foregroundStyle(.secondary)
                     }
                     ForEach(carteira.linhasBinance) { l in
@@ -421,15 +594,23 @@ private struct CampoPrecoMedio: View {
     private var invalido: Bool { !texto.isEmpty && (numero(texto, idioma: idioma) ?? 0) <= 0 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            TextField(moeda, text: $texto, prompt: Text(tr("Não informado", "Not set")))
-                .focused($focado)
-                .onSubmit(salvar)
-                .onChange(of: focado) { if !focado { salvar() } }
-            if invalido {
-                Text(tr("Use um número maior que zero, como 350000 ou 1,25.", "Use a number greater than zero, like 350000 or 1.25."))
-                    .font(.caption)
-                    .foregroundStyle(.red)
+        Group {
+            if Ajustes.atual.privacidade {
+                // O campo mostraria o número: no modo privacidade fica só a leitura, oculta.
+                LabeledContent(moeda, value: carteira.precoMedioBinance[moeda].map { dinheiro($0, "BRL") } ?? tr("Não informado", "Not set"))
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField(moeda, text: $texto, prompt: Text(tr("Não informado", "Not set")))
+                        .focused($focado)
+                        .onSubmit(salvar)
+                        .onChange(of: focado) { if !focado { salvar() } }
+                    if invalido {
+                        Text(tr("Use um número maior que zero, como 350000 ou 1,25.", "Use a number greater than zero, like 350000 or 1.25."))
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .onDisappear(perform: salvar)  // ligar o modo privacidade (ou trocar de aba) no meio da edição não a perde
             }
         }
         // Sem separador de milhar: em português numero() leria "350.000" como 350.
@@ -586,8 +767,76 @@ struct AjustesTela: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            Section {
+                Toggle(tr("Modo privacidade", "Privacy mode"), isOn: $ajustes.privacidade)
+            } footer: {
+                Text(tr("Esconde valores e quantidades no notch e no painel (R$ ••••). Cotações e percentuais continuam visíveis. Também no menu do notch (clique com o botão direito).",
+                        "Hides amounts and quantities in the notch and in this window (R$ ••••). Prices and percentages stay visible. Also in the notch menu (right-click)."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            SecaoAbrirComMac()
         }
         .formStyle(.grouped)
         .navigationTitle(tr("Ajustes", "Settings"))
+    }
+}
+
+// Abrir com o Mac pelo SMAppService. O status vem sempre do sistema: o usuário também liga e desliga
+// em Ajustes do Sistema, e o registro pode ficar esperando a aprovação dele.
+private struct SecaoAbrirComMac: View {
+    @State private var status = SMAppService.Status.notRegistered
+    @State private var erro: Falha?
+
+    var body: some View {
+        Section {
+            Toggle(tr("Abrir com o Mac", "Open at login"), isOn: Binding(get: { status == .enabled || status == .requiresApproval }, set: { alternar($0) }))
+                .disabled(!emPacote)
+            if status == .requiresApproval {
+                HStack {
+                    Label(tr("Falta aprovar em Ajustes do Sistema > Geral > Itens de Início.", "Needs approval in System Settings > General > Login Items."),
+                          systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Spacer()
+                    Button(tr("Abrir Itens de Início…", "Open Login Items…")) { SMAppService.openSystemSettingsLoginItems() }
+                }
+            } else if status == .notFound {
+                Label(tr("O macOS não encontrou o app. Mova o StockNotch.app para Aplicativos e tente de novo.",
+                         "macOS couldn't find the app. Move StockNotch.app to Applications and try again."),
+                      systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+            if let erro {
+                Label(mensagem(erro), systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            }
+        } footer: {
+            Text(emPacote ? tr("Também dá para mudar em Ajustes do Sistema > Geral > Itens de Início.",
+                               "You can also change this in System Settings > General > Login Items.")
+                 : tr("Disponível só no StockNotch.app (monte com ./build.sh): rodando com swift run, não há app para o macOS abrir.",
+                      "Only available in StockNotch.app (build it with ./build.sh): when run with swift run, there's no app for macOS to open."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear(perform: ler)
+        // Volta de Ajustes do Sistema, onde o usuário pode ter aprovado ou desligado.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in ler() }
+    }
+
+    private func ler() {
+        if emPacote { status = SMAppService.mainApp.status }
+    }
+
+    private func alternar(_ ligar: Bool) {
+        erro = nil
+        do {
+            if ligar { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+        } catch {
+            // Só o código: o texto do sistema viria no idioma em que o app abriu.
+            let codigo = (error as NSError).code
+            erro = Falha("Não consegui mudar a abertura com o Mac (erro \(codigo)).", "Couldn't change opening at login (error \(codigo)).")
+        }
+        ler()
     }
 }

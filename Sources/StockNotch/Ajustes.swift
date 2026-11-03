@@ -32,6 +32,11 @@ final class Ajustes {
         didSet { defaults.set(moeda.rawValue, forKey: "moeda") }
     }
 
+    // Esconde valores e quantidades (R$ ••••) no notch e no painel, para mostrar a tela sem expor a carteira.
+    var privacidade: Bool {
+        didSet { defaults.set(privacidade, forKey: "privacidade") }
+    }
+
     @ObservationIgnored private let defaults: UserDefaults
 
     // Sem escolha salva, segue a primeira língua do sistema.
@@ -41,8 +46,12 @@ final class Ajustes {
         let idioma = defaults.string(forKey: "idioma").flatMap(Idioma.init) ?? sistema
         self.idioma = idioma
         moeda = defaults.string(forKey: "moeda").flatMap(Moeda.init) ?? (idioma == .pt ? .BRL : .USD)
+        privacidade = defaults.bool(forKey: "privacidade")
     }
 }
+
+// Abrir com o Mac e as notificações precisam do pacote .app: com swift run não há app para o macOS registrar.
+let emPacote = Bundle.main.bundleURL.pathExtension == "app"
 
 // Texto da interface no idioma escolhido. Sem arquivos de tradução: os dois textos ficam onde são usados.
 @MainActor func tr(_ pt: String, _ en: String, idioma: Idioma = Ajustes.atual.idioma) -> String {
