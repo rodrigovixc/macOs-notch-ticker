@@ -1,5 +1,21 @@
 import SwiftUI
 
+// A vez do letreiro: `quantos` seguidos a partir da página `indice`, dando a volta na lista. Com até `quantos`
+// ativos, todos, parados.
+func pagina<T>(_ lista: [T], quantos: Int, indice: Int) -> [T] {
+    guard lista.count > quantos else { return lista }
+    let inicio = (indice % lista.count) * quantos % lista.count
+    return (0..<quantos).map { lista[(inicio + $0) % lista.count] }
+}
+
+// Metade de cada lista, cada uma com a sua vez; o ímpar fica com a primeira. Lado com menos itens que vagas cede as
+// que sobram ao outro (1 ação e 3 vagas: 1 ação e 2 cripto).
+func paginaDividida<T>(_ a: [T], _ b: [T], quantos: Int, indice: Int) -> ([T], [T]) {
+    let nB = min(quantos - min((quantos + 1) / 2, a.count), b.count)
+    let nA = min(quantos - nB, a.count)
+    return (pagina(a, quantos: nA, indice: indice), pagina(b, quantos: nB, indice: indice))
+}
+
 // Medidas do notch da tela. Em monitor sem notch a largura é 0 e vira uma pílula no topo.
 struct NotchGeometria {
     var largura: CGFloat
@@ -186,9 +202,27 @@ struct NotchView: View {
     private var livre: Bool { Ajustes.atual.posicao == .livre }
     private var geo: NotchGeometria { livre ? .solta : geometria }
 
-    // Largura de cada lado do notch fechado, pelo que ele mostra (o mais largo: "R$ 428.753,68 ▲ 1,23%").
-    private var orelha: CGFloat {
+    // Quantos ativos o widget fechado mostra lado a lado; o total é um só.
+    private var quantos: Int { Ajustes.atual.estilo == .total ? 1 : min(max(Ajustes.atual.quantos, 1), 4) }
+
+    // Um ativo com o seu valor, quando são vários lado a lado.
+    private var larguraItem: CGFloat {
         switch Ajustes.atual.estilo {
+        case .variacao: 105
+        case .preco: 120
+        case .completo, .total: 165
+        }
+    }
+    private let vao: CGFloat = 12  // entre dois ativos
+
+    // Largura de cada lado do notch fechado, pelo que ele mostra (o mais largo: "R$ 428.753,68 ▲ 1,23%").
+    // Vários ativos se dividem entre os dois lados; o esquerdo leva o ímpar.
+    private var orelha: CGFloat {
+        if quantos > 1 {
+            let lado = CGFloat((quantos + 1) / 2)
+            return lado * larguraItem + (lado - 1) * vao + 14
+        }
+        return switch Ajustes.atual.estilo {
         case .variacao: 80
         case .preco: 110
         case .total: 120
@@ -196,6 +230,14 @@ struct NotchView: View {
         }
     }
     private let maximoLinhas = 10
+
+    // Sem o vão do notch (solto, ou tela sem notch), vários ativos ficam numa fila só, sem buraco no meio.
+    private var semVao: Bool { geo.largura == 0 }
+
+    private var larguraFechada: CGFloat {
+        guard semVao && quantos > 1 else { return geo.largura + 2 * orelha }
+        return CGFloat(quantos) * larguraItem + CGFloat(quantos - 1) * vao + 28
+    }
 
     private var animacao: Animation {
         reduzirMovimento ? .easeOut(duration: 0.15) : .spring(response: 0.36, dampingFraction: 0.82)
@@ -223,7 +265,7 @@ struct NotchView: View {
                 fechado.transition(.opacity)
             }
         }
-        .frame(width: expandido ? max(larguraAberta, geo.largura + 2 * orelha) : geo.largura + 2 * orelha, alignment: .top)
+        .frame(width: expandido ? max(larguraAberta, larguraFechada) : larguraFechada, alignment: .top)
         .frame(minHeight: geo.altura, alignment: .top)
         .background(.black)
         .clipShape(forma)
@@ -274,11 +316,12 @@ struct NotchView: View {
     // MARK: Fechado: um ativo de cada vez, nas "orelhas" ao lado do notch
 
     // Só o que está no letreiro (página Widget do painel) e já tem cotação.
-    private var destaque: Linha? {
+    private var letreiro: [Linha] {
         let fora = Ajustes.atual.foraDoLetreiro
-        let lista = (carteira.linhas + carteira.linhasBinance).filter { $0.cotacao != nil && !fora.contains($0.id) }
-        return lista.isEmpty ? nil : lista[indice % lista.count]
+        return (carteira.linhas + carteira.linhasBinance).filter { $0.cotacao != nil && !fora.contains($0.id) }
     }
+
+    private var destaque: Linha? { pagina(letreiro, quantos: 1, indice: indice).first }
 
     private var troca: AnyTransition {
         reduzirMovimento ? .opacity : .push(from: .bottom)
@@ -289,7 +332,7 @@ struct NotchView: View {
         let estilo = Ajustes.atual.estilo
         let total = estilo == .total ? carteira.total : nil
         let atual = estilo == .total ? nil : destaque
-        return HStack(spacing: 0) {
+        return Group { if quantos > 1 { varios } else { HStack(spacing: 0) {
             ZStack(alignment: .leading) {
                 if let total {
                     Text(valor: dinheiro(total.patrimonio, total.moeda))
@@ -320,7 +363,7 @@ struct NotchView: View {
                 }
             }
             .frame(width: orelha - 14, alignment: .trailing)
-        }
+        } } }
         .font(.system(size: 12, weight: .semibold))
         .monospacedDigit()
         .lineLimit(1)
@@ -334,6 +377,53 @@ struct NotchView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { withAnimation(animacao) { expandido = true } }
         .accessibilityAction(named: tr("Abrir painel", "Open StockNotch"), abrirPainel)
+    }
+
+    // A página com vários: a metade da esquerda (o ímpar fica com ela) e a da direita. Dividindo, ações à esquerda
+    // e cripto à direita, cada lado com a sua vez; faltando um dos dois tipos, divide a lista como sempre.
+    private var paginaVarios: (esquerda: [Linha], direita: [Linha]) {
+        let meio = (quantos + 1) / 2
+        let acoes = letreiro.filter { !$0.ativo.cripto }
+        let cripto = letreiro.filter(\.ativo.cripto)
+        if Ajustes.atual.dividir && !acoes.isEmpty && !cripto.isEmpty {
+            return paginaDividida(acoes, cripto, quantos: quantos, indice: indice)
+        }
+        let itens = pagina(letreiro, quantos: quantos, indice: indice)
+        return (Array(itens.prefix(meio)), Array(itens.dropFirst(meio)))
+    }
+
+    // Vários de uma vez: a página do letreiro, dividida pelos dois lados do notch (sem notch, numa fila só).
+    @ViewBuilder private var varios: some View {
+        let (esquerda, direita) = paginaVarios
+        if esquerda.isEmpty && direita.isEmpty {
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+        } else if semVao {
+            fila(esquerda + direita)
+        } else {
+            HStack(spacing: 0) {
+                fila(esquerda).frame(width: orelha - 14, alignment: .leading)
+                Spacer(minLength: geo.largura)
+                fila(direita).frame(width: orelha - 14, alignment: .trailing)
+            }
+        }
+    }
+
+    private func fila(_ itens: [Linha]) -> some View {
+        let estilo = Ajustes.atual.estilo
+        return HStack(spacing: vao) {
+            ForEach(itens) { l in
+                HStack(spacing: 5) {
+                    Text(l.ativo.simbolo)
+                    if let c = l.cotacao {
+                        if estilo != .variacao { Text(dinheiro(c.preco, c.moeda, oculto: false)).foregroundStyle(.white.opacity(0.75)) }
+                        if estilo != .preco { variacao(c.variacao) }
+                    }
+                }
+                .transition(troca)
+            }
+        }
     }
 
     private func variacao(_ fracao: Double) -> some View {
@@ -350,9 +440,14 @@ struct NotchView: View {
             let valor = falado(dinheiro(total.patrimonio, total.moeda))
             return tr("Carteira, \(valor), \(pct(total.hojePct)) hoje", "Portfolio, \(valor), \(pct(total.hojePct)) today")
         }
-        guard let atual = destaque, let c = atual.cotacao else { return "StockNotch" }
-        let preco = Ajustes.atual.estilo == .variacao ? "" : dinheiro(c.preco, c.moeda, oculto: false) + ", "
-        return tr("\(atual.ativo.simbolo), \(preco)\(pct(c.variacao)) hoje", "\(atual.ativo.simbolo), \(preco)\(pct(c.variacao)) today")
+        let (esquerda, direita) = paginaVarios
+        let itens = (quantos > 1 ? esquerda + direita : Array(destaque.map { [$0] } ?? [])).compactMap { l in
+            l.cotacao.map { c in
+                let preco = Ajustes.atual.estilo == .variacao ? "" : dinheiro(c.preco, c.moeda, oculto: false) + ", "
+                return tr("\(l.ativo.simbolo), \(preco)\(pct(c.variacao)) hoje", "\(l.ativo.simbolo), \(preco)\(pct(c.variacao)) today")
+            }
+        }
+        return itens.isEmpty ? "StockNotch" : itens.joined(separator: "; ")
     }
 
     // MARK: Aberto: patrimônio e lista

@@ -993,6 +993,12 @@ struct WidgetTela: View {
                 nota(tr("Passe o mouse no widget para ver a carteira inteira.", "Hover over the widget to see your whole portfolio."))
             }
             Section {
+                Picker(tr("Ao mesmo tempo", "At a time"), selection: $ajustes.quantos) {
+                    ForEach(1...4, id: \.self) { Text("\($0)").tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Toggle(tr("Dividir: metade ações, metade cripto", "Split: half stocks, half crypto"), isOn: $ajustes.dividir)
+                    .disabled(ajustes.quantos < 2)
                 Picker(tr("Trocar a cada", "Switch every"), selection: $ajustes.ritmo) {
                     ForEach([2, 4, 6, 10], id: \.self) { Text("\($0) s").tag($0) }
                 }
@@ -1014,8 +1020,8 @@ struct WidgetTela: View {
             } header: {
                 Text(tr("Letreiro", "Ticker"))
             } footer: {
-                nota(linhas.isEmpty ? "" : tr("\(girando) de \(linhas.count) ativos giram no widget. Ativo novo entra girando.",
-                                              "\(girando) of \(linhas.count) assets rotate in the widget. New assets are included."))
+                nota(linhas.isEmpty ? "" : tr("\(girando) de \(linhas.count) ativos giram no widget. Ativo novo entra girando. Dividindo, as ações ficam à esquerda e as cripto à direita, cada lado com a sua vez. Com mais de um ao mesmo tempo, o widget fica mais largo e, no notch, pode cobrir itens da barra de menus.",
+                                              "\(girando) of \(linhas.count) assets rotate in the widget. New assets are included. When split, stocks go on the left and crypto on the right, each side taking its own turns. With more than one at a time the widget gets wider and, in the notch, may cover menu bar items."))
             }
             .disabled(ajustes.estilo == .total)
         }

@@ -57,6 +57,16 @@ final class Ajustes {
         didSet { defaults.set(estilo.rawValue, forKey: "estilo") }
     }
 
+    // Quantos ativos o widget fechado mostra lado a lado (1 a 4).
+    var quantos: Int {
+        didSet { defaults.set(quantos, forKey: "quantos") }
+    }
+
+    // Com vários ao mesmo tempo, metade ações e metade cripto (cada metade gira por conta própria).
+    var dividir: Bool {
+        didSet { defaults.set(dividir, forKey: "dividir") }
+    }
+
     // Segundos de cada ativo no letreiro do widget fechado.
     var ritmo: Int {
         didSet { defaults.set(ritmo, forKey: "ritmo") }
@@ -85,6 +95,8 @@ final class Ajustes {
         posicao = defaults.string(forKey: "posicao").flatMap(PosicaoWidget.init) ?? .notch
         estilo = defaults.string(forKey: "estilo").flatMap(EstiloWidget.init) ?? .variacao
         ritmo = defaults.object(forKey: "ritmo") as? Int ?? 4
+        quantos = defaults.object(forKey: "quantos") as? Int ?? 1
+        dividir = defaults.bool(forKey: "dividir")
         foraDoLetreiro = Set(defaults.stringArray(forKey: "foraDoLetreiro") ?? [])
         ancoraLivre = (defaults.array(forKey: "ancoraLivre") as? [Double]).flatMap { $0.count == 2 ? CGPoint(x: $0[0], y: $0[1]) : nil }
     }
