@@ -29,6 +29,7 @@ Built with SwiftUI and AppKit, no third-party dependencies. The interface is in 
 - **Privacy mode**: hides amounts and quantities (`R$ ••••`) in the notch and the management window, so you can share your screen; prices and percentages stay visible. Toggle it in **Settings** or from the notch's right-click menu.
 - **Open at login**: one switch in **Settings**, using the macOS login items service.
 - **Management window**: a native table with your assets, transaction history (purchases and sales), price alerts and the Binance connection.
+- **CSV import**: paste or open a list of purchases and sales, check each line in a preview, then import them all at once.
 - **Accessibility**: changes are shown with arrows and signs, not just color, and animations respect *Reduce Motion*.
 
 ## Requirements
@@ -63,6 +64,22 @@ open StockNotch.app
 Open at login and notifications need the app bundle: when run with `swift run`, the switch is disabled and alerts don't notify.
 
 To work on the code, open `Package.swift` in Xcode.
+
+## Importing transactions
+
+**Import…** in the Portfolio toolbar takes a CSV, pasted or opened from a file, one transaction per line:
+
+```
+type,symbol,crypto,quantity,price,date
+buy,PETR4,no,200,38.40,2026-03-10
+sell,PETR4,no,50,47.10,2026-09-02
+buy,BTC,yes,0.015,385000,2026-06-01
+```
+
+- Type is `buy`/`sell` (or `compra`/`venda`), crypto is `yes`/`no` (or `sim`/`nao`). Prices use the same currencies as the purchase form: reais for B3 and crypto, dollars for US stocks.
+- Numbers use a decimal point and no thousands separator, and dates are year-month-day, whatever the app's language, so `1.500` is never ambiguous. Columns can be separated by commas or semicolons; blank lines, `#` comments and a header line are skipped.
+- Every line is checked before anything is saved, in file order, with the same rules as the form (no future dates, no sale above the holding on that date). The preview shows each transaction with its total, or why the line was refused. **Import** stays off while any line has an error, so a fixed file can be imported again without duplicating lines that were already in.
+- To import from a screenshot of your broker's app, ask an AI assistant to turn the image into this format, then paste the result. A portfolio screen usually shows positions, not history: enter each one as a single purchase at its average price. Value and unrealized P&L come out right; past realized gains don't, since they aren't in the picture.
 
 ## Connecting Binance
 
@@ -119,7 +136,7 @@ swift test
 
 [CI](.github/workflows/ci.yml) builds and runs them on every push and pull request (macOS 26, latest stable Xcode). Pushing a `v*` tag publishes the zipped app to [Releases](https://github.com/rodrigovixc/macOs-notch-ticker/releases).
 
-The tests cover the intraday chart (Yahoo 5-minute bars and Binance klines from real captured responses, empty bars, the last point matching the price shown, series from another day or ahead of the quote, crypto converted to BRL point by point, fixed prices), price alert crossings (fires once, re-arms only past the margin, daily change both ways, already past on creation), the quote each alert is checked against (its own currency, not the display one), alerts saved in `carteira.json` (and files without them), privacy-mode masking and its setting, the Binance WebSocket messages (a real captured kline and the `serverShutdown` notice), Yahoo quotes with quote time, delay and trading period (real captured responses), the data-age rules (live, delayed, closed, stale, Yahoo's wrong B3 hours, holidays), frozen quotes and fixed prices, the snapshot with a single exchange rate (crypto converted like Google's `BTC-BRL`, stale rates left out, crypto in USD without a rate), the AwesomeAPI fallback (a real captured response), Binance balances without an exchange rate, tick grouping and reconnection waits (including silent connections), average-cost P&L with sales (several purchases, partial sale, full sale and buyback, same-day purchase and sale), sale validation, reading the old `carteira.json` format, realized P&L in totals, currency conversion and the single converted total (including Binance balances and missing exchange rates), symbol normalization, decimal parsing in both languages (`1.234,56`, `0.5`, `1,234.56`), translations, currency formatting per language, settings defaults and persistence, Binance request signing, checked against the example in the Binance documentation, and the read-only key check (an `apiRestrictions` response with a permission the app doesn't list is refused). They also cover reading `carteira.json` from disk (missing file vs. a folder or broken link), thousands separators and invalid numbers (`350.000`, `0,050`, `inf`), daily-change alerts re-arming on a new day, crypto in BRL timed by its older part, Yahoo's wrong B3 hours right after 17:00, and Binance balances without a quote.
+The tests cover the intraday chart (Yahoo 5-minute bars and Binance klines from real captured responses, empty bars, the last point matching the price shown, series from another day or ahead of the quote, crypto converted to BRL point by point, fixed prices), price alert crossings (fires once, re-arms only past the margin, daily change both ways, already past on creation), the quote each alert is checked against (its own currency, not the display one), alerts saved in `carteira.json` (and files without them), privacy-mode masking and its setting, the Binance WebSocket messages (a real captured kline and the `serverShutdown` notice), Yahoo quotes with quote time, delay and trading period (real captured responses), the data-age rules (live, delayed, closed, stale, Yahoo's wrong B3 hours, holidays), frozen quotes and fixed prices, the snapshot with a single exchange rate (crypto converted like Google's `BTC-BRL`, stale rates left out, crypto in USD without a rate), the AwesomeAPI fallback (a real captured response), Binance balances without an exchange rate, tick grouping and reconnection waits (including silent connections), average-cost P&L with sales (several purchases, partial sale, full sale and buyback, same-day purchase and sale), sale validation, reading the old `carteira.json` format, realized P&L in totals, currency conversion and the single converted total (including Binance balances and missing exchange rates), symbol normalization, decimal parsing in both languages (`1.234,56`, `0.5`, `1,234.56`), translations, currency formatting per language, settings defaults and persistence, Binance request signing, checked against the example in the Binance documentation, and the read-only key check (an `apiRestrictions` response with a permission the app doesn't list is refused). They also cover reading `carteira.json` from disk (missing file vs. a folder or broken link), thousands separators and invalid numbers (`350.000`, `0,050`, `inf`), daily-change alerts re-arming on a new day, crypto in BRL timed by its older part, Yahoo's wrong B3 hours right after 17:00, Binance balances without a quote, Yahoo's empty bars before the first trade of the day, and CSV import (header, comments, semicolons, a sale after its purchase in the same file, and refused lines: decimal commas, exponents, zero, future or impossible dates, unknown types, missing columns, sales above the holding).
 
 ## Project structure
 
@@ -133,6 +150,7 @@ Sources/StockNotch/
 ├── Cotacoes.swift  # quotes and their age, snapshot, Yahoo and Binance REST
 ├── TempoReal.swift # Binance WebSocket stream, tick grouping, reconnection
 ├── Operacoes.swift # purchases and sales, average-cost position, sale validation
+├── Importar.swift  # CSV import: parsing and line-by-line validation
 ├── Alertas.swift   # price alerts: crossing rule and native notifications
 ├── Grafico.swift   # intraday sparkline: series, fitting to the price shown, Swift Charts view
 └── Binance.swift   # signed read-only API calls and Keychain storage
