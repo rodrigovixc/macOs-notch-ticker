@@ -21,6 +21,7 @@ Built with SwiftUI and AppKit, no third-party dependencies. The interface is in 
 - **Notch widget**: a black panel that blends with the notch, cycles through your assets (`PETR4 ▲ 1.20%`) and expands on hover into a full portfolio view. On displays without a notch it becomes a small pill centered on the menu bar.
 - **Your layout**: on the **Widget** page, keep it in the notch or let it float anywhere you drag it, choose what it shows collapsed (change, price, both, or the portfolio total), how fast it switches and which assets rotate.
 - **Stocks and crypto**: Brazilian (B3) and US stocks via Yahoo Finance, refreshed every 10 seconds (US stocks in real time; B3 15 minutes delayed, like Google Finance); crypto streamed live from the Binance public WebSocket, with the REST API as a fallback. Daily change uses the same definition as Google Finance in each market.
+- **Stock indicators on hover**: rest the pointer on a stock in the expanded notch and its row opens with the day's open, high, low and previous close, volume and 3-month average volume, 52-week high and low, market cap, P/E, EPS, dividend yield and P/B (Yahoo Finance, refreshed at most every 5 minutes per stock).
 - **Intraday sparkline**: a small chart of the day next to each price, in the expanded notch and in the management table. Green or red with the day's change, with a subtle dashed line at the previous close, and it always ends at the price shown beside it.
 - **Data age at a glance**: each price carries a badge: *live*, the source delay (*15 min* for B3), *closed*, the quote's time when the source can't confirm it's current, or a warning with the time of the last update when a price hasn't refreshed for over 2 minutes.
 - **Profit and loss**: record purchases and sales and see average cost, unrealized and realized P&L per asset and a single portfolio total (value, today's change, unrealized and realized return). Uses the average-cost method.
@@ -161,6 +162,7 @@ Sources/StockNotch/
 ├── Operacoes.swift # purchases and sales, average-cost position, sale validation
 ├── Importar.swift  # CSV import: parsing and line-by-line validation
 ├── Alertas.swift   # price alerts: crossing rule and native notifications
+├── Indicadores.swift # stock indicators for the notch hover detail (Yahoo quote with crumb)
 ├── Grafico.swift   # intraday sparkline: series, fitting to the price shown, Swift Charts view
 └── Binance.swift   # signed read-only API calls and Keychain storage
 ```
