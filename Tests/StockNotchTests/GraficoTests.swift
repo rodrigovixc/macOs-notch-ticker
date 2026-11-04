@@ -157,3 +157,11 @@ private let btc = Cotacao(preco: 77_840, variacao: 77_840 / 76_816.01 - 1, moeda
     let vazio = try JSONDecoder().decode(Indicadores.self, from: Data(#"{"currency":"USD"}"#.utf8))
     #expect(vazio.trailingPE == nil && vazio.marketCap == nil)
 }
+
+// Busca do Yahoo (04/11/2026, "itau" e "bitcoin" juntas): fundo, futuro e cripto fora do dólar ficam de fora.
+@Test func buscaDeAtivos() throws {
+    let json = #"{"quotes":[{"symbol":"ITUB","shortname":"Itau Unibanco Banco Holding SA","quoteType":"EQUITY","exchDisp":"NYSE"},{"symbol":"ITUB4.SA","shortname":"ITAUUNIBANCOPN      N1","quoteType":"EQUITY","exchDisp":"São Paulo"},{"symbol":"0P0001VQAW.SA","quoteType":"MUTUALFUND","exchDisp":"São Paulo"},{"symbol":"BTC-USD","shortname":"Bitcoin USD","quoteType":"CRYPTOCURRENCY","exchDisp":"CCC"},{"symbol":"BTC-EUR","shortname":"Bitcoin EUR","quoteType":"CRYPTOCURRENCY"},{"symbol":"IBIT","longname":"iShares Bitcoin Trust ETF","quoteType":"ETF","exchDisp":"NASDAQ"},{"symbol":"BTC=F","quoteType":"FUTURE"}]}"#
+    let s = try JSONDecoder().decode(RespostaBusca.self, from: Data(json.utf8)).sugestoes
+    #expect(s.map(\.id) == ["a:ITUB", "a:ITUB4", "c:BTC", "a:IBIT"])
+    #expect(s[1].nome == "ITAUUNIBANCOPN N1" && s[1].bolsa == "São Paulo" && s[2].cripto)
+}
