@@ -72,7 +72,7 @@ The **Widget** page in the management window applies changes right away:
 
 - **Position**: *in the notch* (top center, blending with the notch or as a pill on displays without one) or *floating*: a pill you drag anywhere, on any display. It remembers where you left it, stays on screen when it expands near an edge, and **Move Back to the Top of the Screen** resets it.
 - **Collapsed**: the asset and its daily change (`PETR4 ▲ 1.20%`), the asset and its price, the asset with price and change, or the portfolio total and today's change without rotating. Wider choices make the collapsed widget wider.
-- **Ticker**: switch every 2, 4, 6 or 10 seconds, and pick which assets rotate. The choice is stored as the assets you turned off, so a new asset rotates until you turn it off.
+- **Ticker**: show 1 to 4 assets at a time (split between both sides of the notch, or in one row on displays without a notch or when floating), optionally half stocks and half crypto, each half taking its own turns; switch every 2, 4, 6 or 10 seconds, and pick which assets rotate. The choice is stored as the assets you turned off, so a new asset rotates until you turn it off.
 
 ## Importing transactions
 
