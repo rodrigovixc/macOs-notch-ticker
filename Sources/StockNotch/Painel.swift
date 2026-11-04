@@ -57,14 +57,12 @@ struct PainelView: View {
         }
         .frame(minWidth: 1080, minHeight: 480)
         // Vidro: a área de trabalho aparece desfocada atrás da janela, e a barra lateral flutua por cima (macOS 26+).
-        .background {
-            ZStack {
-                FundoDeVidro()
-                LinearGradient(colors: Ajustes.atual.tema.veu, startPoint: .top, endPoint: .bottom)
-            }
-            .ignoresSafeArea()
-        }
-        .tint(Ajustes.atual.tema.destaque)
+        // Design system do tema: fundo, cor de destaque, tipografia e aparência clara ou escura.
+        .background { FundoDoPainel().ignoresSafeArea() }
+        .tint(Ajustes.atual.tema.estilo.destaque)
+        // nil no padrão: um fontDesign(.default) por cima anularia a serifa que o Luxo põe nos títulos.
+        .fontDesign(Ajustes.atual.tema.estilo.fonte == .default ? nil : Ajustes.atual.tema.estilo.fonte)
+        .preferredColorScheme(Ajustes.atual.tema.estilo.esquema)
         // Controles nativos (DatePicker etc.) seguem o idioma do app, não o do sistema.
         .environment(\.locale, Ajustes.atual.idioma.locale)
     }
@@ -1220,8 +1218,8 @@ struct AjustesTela: View {
             } header: {
                 Text(tr("Tema", "Theme"))
             } footer: {
-                Text(tr("Muda a cor de destaque, o tom da janela, a linha do patrimônio e o fundo do widget. Alta e baixa continuam verde e vermelho.",
-                        "Changes the accent color, the window tint, the portfolio line and the widget background. Gains and losses stay green and red."))
+                Text(tr("Cada tema é um design system: cores, tipografia, cantos, cartões, densidade e o layout da Visão geral (cartões, compacto ou editorial). Alta e baixa continuam verde e vermelho.",
+                        "Each theme is a design system: colors, typography, corners, cards, density and the Overview layout (cards, compact or editorial). Gains and losses stay green and red."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

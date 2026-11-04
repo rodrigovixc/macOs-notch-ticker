@@ -294,6 +294,7 @@ struct NotchView: View {
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: aoMudarTamanho)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
+        .fontDesign(Ajustes.atual.tema.estilo.fonte)  // o widget fala a tipografia do tema (Terminal em mono, Suave arredondado)
         .task(id: estado.mouseDentro) {
             // A espera evita abrir sem querer quando o mouse só passa a caminho da barra de menus.
             try? await Task.sleep(for: .milliseconds(estado.mouseDentro ? 150 : 350))

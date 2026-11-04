@@ -15,7 +15,7 @@ extension Color {
 
     static let azulDados = Color(claro: 0x2A78D6, escuro: 0x3987E5)
     // A linha do patrimônio segue o tema; no Padrão, o azul validado da paleta.
-    @MainActor static var serie1: Color { Ajustes.atual.tema == .padrao ? azulDados : Ajustes.atual.tema.destaque }
+    @MainActor static var serie1: Color { Ajustes.atual.tema.estilo.linha }
 }
 
 extension Classe {
@@ -116,26 +116,7 @@ struct VisaoGeralTela: View {
                                        description: Text(tr("Adicione ativos na Carteira ou conecte a Binance.", "Add assets in Portfolio or connect Binance.")))
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if let total = carteira.total {
-                            numeros(total)
-                        } else if let aviso = carteira.avisoTotal {
-                            Label(aviso, systemImage: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
-                        }
-                        cartao(tr("Patrimônio", "Portfolio value")) { patrimonio }
-                        HStack(alignment: .top, spacing: 16) {
-                            cartao(tr("Alocação por classe", "Allocation by class")) {
-                                FaixaAlocacao(classes: porClasse(carteira.fatias), altura: 14)
-                            }
-                            cartao(tr("Alocação por ativo", "Allocation by asset")) { alocacao }
-                        }
-                        HStack(alignment: .top, spacing: 16) {
-                            cartao(tr("Hoje", "Today")) { hoje }
-                            cartao(tr("Resultado em aberto", "Unrealized gain")) { resultados }
-                        }
-                        if !desejos.isEmpty { cartao(tr("Lista de desejos", "Wishlist")) { listaDeDesejos } }
-                    }
-                    .padding(20)
+                    if estilo.layout == .editorial { editorial } else { grade }
                 }
             }
         }
@@ -146,10 +127,93 @@ struct VisaoGeralTela: View {
         }
     }
 
+    private var estilo: EstiloVisual { Ajustes.atual.tema.estilo }
+    private var compacto: Bool { estilo.layout == .compacto }
+
+    // Cartões (o padrão) e compacto (denso: tudo menor, mais junto).
+    private var grade: some View {
+        VStack(alignment: .leading, spacing: estilo.espaco) {
+            if let total = carteira.total {
+                numeros(total)
+            } else if let aviso = carteira.avisoTotal {
+                Label(aviso, systemImage: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+            }
+            cartao(tr("Patrimônio", "Portfolio value")) { patrimonio }
+            HStack(alignment: .top, spacing: estilo.espaco) {
+                cartao(tr("Alocação por classe", "Allocation by class")) {
+                    FaixaAlocacao(classes: porClasse(carteira.fatias), altura: compacto ? 8 : 14)
+                }
+                cartao(tr("Alocação por ativo", "Allocation by asset")) { alocacao }
+            }
+            HStack(alignment: .top, spacing: estilo.espaco) {
+                cartao(tr("Hoje", "Today")) { hoje }
+                cartao(tr("Resultado em aberto", "Unrealized gain")) { resultados }
+            }
+            if !desejos.isEmpty { cartao(tr("Lista de desejos", "Wishlist")) { listaDeDesejos } }
+        }
+        .padding(compacto ? 12 : 20)
+    }
+
+    // Editorial: o patrimônio em número grande, as seções corridas e separadas por fios, sem cartões.
+    private var editorial: some View {
+        VStack(alignment: .leading, spacing: estilo.espaco) {
+            if let t = carteira.total {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(tr("Patrimônio", "Portfolio value").uppercased()).font(.caption.weight(.semibold)).tracking(1.2).foregroundStyle(.secondary)
+                    Text(valor: dinheiro(t.patrimonio, t.moeda))
+                        .font(.system(size: 46, weight: .semibold, design: estilo.fonteTitulo))
+                        .monospacedDigit()
+                    HStack(spacing: 18) {
+                        resumoEditorial(tr("Hoje", "Today"), dinheiro(t.hoje, t.moeda, sinal: true) + " (\(pct(t.hojePct)))", cor(t.hoje))
+                        if t.custo > 0 {
+                            resumoEditorial(tr("Em aberto", "Unrealized"), dinheiro(t.aberto.lucro, t.moeda, sinal: true) + " (\(pct(t.aberto.percentual)))", cor(t.aberto.lucro))
+                            resumoEditorial(tr("Investido", "Invested"), dinheiro(t.custo, t.moeda), .primary)
+                        }
+                        if t.realizado != 0 { resumoEditorial(tr("Realizado", "Realized"), dinheiro(t.realizado, t.moeda, sinal: true), cor(t.realizado)) }
+                    }
+                }
+            } else if let aviso = carteira.avisoTotal {
+                Label(aviso, systemImage: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+            }
+            secao(tr("Patrimônio no tempo", "Value over time")) { patrimonio }
+            Divider()
+            HStack(alignment: .top, spacing: 40) {
+                secao(tr("Alocação por classe", "Allocation by class")) { FaixaAlocacao(classes: porClasse(carteira.fatias), altura: 10) }
+                secao(tr("Alocação por ativo", "Allocation by asset")) { alocacao }
+            }
+            Divider()
+            HStack(alignment: .top, spacing: 40) {
+                secao(tr("Hoje", "Today")) { hoje }
+                secao(tr("Resultado em aberto", "Unrealized gain")) { resultados }
+            }
+            if !desejos.isEmpty {
+                Divider()
+                secao(tr("Lista de desejos", "Wishlist")) { listaDeDesejos }
+            }
+        }
+        .padding(32)
+    }
+
+    private func resumoEditorial(_ rotulo: String, _ valor: String, _ cor: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(rotulo).font(.caption).foregroundStyle(.secondary)
+            Text(valor: valor).font(.callout.weight(.medium)).foregroundStyle(cor).monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func secao<Conteudo: View>(_ titulo: String, @ViewBuilder _ conteudo: () -> Conteudo) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(titulo).font(.system(size: 20, weight: .semibold, design: estilo.fonteTitulo))
+            conteudo()
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
     // MARK: Números
 
     private func numeros(_ t: Total) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12)], spacing: 12) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: compacto ? 140 : 170), spacing: estilo.espaco)], spacing: estilo.espaco) {
             numero(tr("Patrimônio", "Portfolio value"), dinheiro(t.patrimonio, t.moeda), destaque: true)
             numero(tr("Hoje", "Today"), dinheiro(t.hoje, t.moeda, sinal: true), detalhe: pct(t.hojePct), cor: cor(t.hoje))
             numero(tr("Em aberto", "Unrealized"), t.custo > 0 ? dinheiro(t.aberto.lucro, t.moeda, sinal: true) : "—",
@@ -161,17 +225,17 @@ struct VisaoGeralTela: View {
 
     private func numero(_ rotulo: String, _ valor: String, detalhe: String? = nil, cor: Color = .primary, destaque: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(rotulo).font(.caption).foregroundStyle(.secondary)
+            Text(compacto ? rotulo.uppercased() : rotulo).font(compacto ? .caption2.weight(.semibold) : .caption).foregroundStyle(.secondary)
             Text(valor: valor)
-                .font(.system(size: destaque ? 24 : 18, weight: .semibold, design: .rounded))
+                .font(.system(size: (destaque ? 24 : 18) - (compacto ? 5 : 0), weight: .semibold, design: estilo.fonteTitulo))
                 .foregroundStyle(destaque ? .primary : cor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
             if let detalhe { Text(detalhe).font(.caption).foregroundStyle(cor) }
         }
         .monospacedDigit()
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
+        .padding(compacto ? 10 : estilo.respiro - 2)
+        .frame(maxWidth: .infinity, minHeight: compacto ? 58 : 78, alignment: .topLeading)
         .modifier(FundoCartao())
         .accessibilityElement(children: .combine)
     }
@@ -215,11 +279,11 @@ struct VisaoGeralTela: View {
                     ForEach(d.valor, id: \.em) { p in
                         AreaMark(x: .value("Data", p.em), yStart: .value("Base", base), yEnd: .value("Valor", p.preco))
                             .foregroundStyle(LinearGradient(colors: [Color.serie1.opacity(0.22), Color.serie1.opacity(0)], startPoint: .top, endPoint: .bottom))
-                            .interpolationMethod(.monotone)
+                            .interpolationMethod(estilo.interpolacao)
                         LineMark(x: .value("Data", p.em), y: .value("Valor", p.preco), series: .value("Série", "valor"))
                             .foregroundStyle(Color.serie1)
                             .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                            .interpolationMethod(.monotone)
+                            .interpolationMethod(estilo.interpolacao)
                     }
                     ForEach(d.investido, id: \.em) { p in
                         LineMark(x: .value("Data", p.em), y: .value("Valor", p.preco), series: .value("Série", "investido"))
@@ -252,7 +316,7 @@ struct VisaoGeralTela: View {
                         AxisValueLabel(format: periodo == .dia ? .dateTime.hour().minute() : .dateTime.day().month(.abbreviated))
                     }
                 }
-                .frame(height: 230)
+                .frame(height: compacto ? 170 : 230)
                 .accessibilityLabel(tr("Gráfico do patrimônio", "Portfolio value chart"))
             } else if periodo != .dia && carteira.historico.isEmpty {
                 HStack(spacing: 8) {
@@ -415,11 +479,13 @@ struct VisaoGeralTela: View {
     // MARK: Peças
 
     private func cartao<Conteudo: View>(_ titulo: String, @ViewBuilder _ conteudo: () -> Conteudo) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(titulo).font(.headline)
+        VStack(alignment: .leading, spacing: compacto ? 8 : 12) {
+            Text(compacto ? titulo.uppercased() : titulo)
+                .font(compacto ? .caption.weight(.semibold) : .system(.headline, design: estilo.fonteTitulo))
+                .foregroundStyle(compacto ? .secondary : .primary)
             conteudo()
         }
-        .padding(16)
+        .padding(estilo.respiro)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .modifier(FundoCartao())
     }
@@ -427,17 +493,5 @@ struct VisaoGeralTela: View {
     // 1.234.567 → "R$ 1,2 mi" no eixo, onde não cabe o valor inteiro.
     private func compacto(_ v: Double, moeda: String) -> String {
         v.formatted(.currency(code: moeda).notation(.compactName).precision(.fractionLength(0...1)).locale(Ajustes.atual.idioma.locale))
-    }
-}
-
-// Cartão de vidro no macOS 26 em diante; antes, material.
-struct FundoCartao: ViewModifier {
-    func body(content: Content) -> some View {
-        let forma = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: forma)
-        } else {
-            content.background(.regularMaterial, in: forma)
-        }
     }
 }
