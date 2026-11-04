@@ -519,10 +519,16 @@ struct NotchView: View {
                     Text(tr("Patrimônio", "Portfolio value"))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text(valor: dinheiro(total.patrimonio, total.moeda))
-                        .font(.system(size: 26, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
+                    // O patrimônio de hoje ao lado do número, e a alocação embaixo dos indicadores.
+                    HStack(alignment: .center, spacing: 12) {
+                        Text(valor: dinheiro(total.patrimonio, total.moeda))
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                        Spacer(minLength: 0)
+                        let dia = carteira.patrimonioDoDia
+                        if dia.count > 2 { MiniPatrimonio(pontos: dia).frame(width: 130, height: 34) }
+                    }
                     HStack(spacing: 14) {
                         Indicador(rotulo: tr("Hoje", "Today"), resultado: Resultado(lucro: total.hoje, percentual: total.hojePct), moeda: total.moeda)
                         if total.custo > 0 {
@@ -533,6 +539,12 @@ struct NotchView: View {
                     if total.realizado != 0 {
                         Indicador(rotulo: tr("Realizado", "Realized"), resultado: Resultado(lucro: total.realizado, percentual: 0),
                                   moeda: total.moeda, comPercentual: false)
+                    }
+                    let classes = porClasse(carteira.fatias)
+                    if classes.count > 1 {
+                        FaixaAlocacao(classes: classes, altura: 5)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .padding(.top, 4)
                     }
                 }
             }
