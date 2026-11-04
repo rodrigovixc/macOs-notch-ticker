@@ -50,6 +50,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             host.sceneBridgingOptions = [.toolbars, .title]
             host.sizingOptions = [.minSize]  // a janela não encolhe abaixo do mínimo do SwiftUI
             let janela = NSWindow(contentViewController: host)
+            // ponytail: aberta no início do app com a carteira vazia, a ponte não traz o navigationTitle e a
+            // janela ficava "Untitled"; quando a ponte funciona, o título da seção substitui este.
+            janela.title = "StockNotch"
             janela.styleMask.insert(.fullSizeContentView)
             janela.toolbarStyle = .unified
             janela.setContentSize(NSSize(width: 1240, height: 600))
