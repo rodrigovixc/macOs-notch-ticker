@@ -13,7 +13,9 @@ extension Color {
         self.init(nsColor: NSColor(name: nil) { a in a.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? cor(escuro) : cor(claro) })
     }
 
-    static let serie1 = Color(claro: 0x2A78D6, escuro: 0x3987E5)
+    static let azulDados = Color(claro: 0x2A78D6, escuro: 0x3987E5)
+    // A linha do patrimônio segue o tema; no Padrão, o azul validado da paleta.
+    @MainActor static var serie1: Color { Ajustes.atual.tema == .padrao ? azulDados : Ajustes.atual.tema.destaque }
 }
 
 extension Classe {
@@ -27,7 +29,7 @@ extension Classe {
 
     var cor: Color {
         switch self {
-        case .b3: .serie1
+        case .b3: .azulDados
         case .cripto: Color(claro: 0xEB6834, escuro: 0xD95926)
         case .exterior: Color(claro: 0x1BAF7A, escuro: 0x199E70)
         }

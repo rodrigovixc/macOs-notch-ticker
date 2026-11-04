@@ -58,6 +58,10 @@ final class Ajustes {
         didSet { defaults.set(vidro, forKey: "vidro") }
     }
 
+    var tema: Tema {
+        didSet { defaults.set(tema.rawValue, forKey: "tema") }
+    }
+
     var estilo: EstiloWidget {
         didSet { defaults.set(estilo.rawValue, forKey: "estilo") }
     }
@@ -100,6 +104,7 @@ final class Ajustes {
         posicao = defaults.string(forKey: "posicao").flatMap(PosicaoWidget.init) ?? .notch
         estilo = defaults.string(forKey: "estilo").flatMap(EstiloWidget.init) ?? .variacao
         vidro = defaults.object(forKey: "vidro") as? Bool ?? true
+        tema = defaults.string(forKey: "tema").flatMap(Tema.init) ?? .padrao
         ritmo = defaults.object(forKey: "ritmo") as? Int ?? 4
         quantos = defaults.object(forKey: "quantos") as? Int ?? 1
         dividir = defaults.bool(forKey: "dividir")

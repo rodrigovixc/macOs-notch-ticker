@@ -632,10 +632,11 @@ private struct FundoWidget<Forma: Shape>: ViewModifier {
         if vidro, #available(macOS 26.0, *) {
             content
                 .clipShape(forma)
-                .glassEffect(.regular.tint(.black.opacity(0.45)), in: forma)
+                .glassEffect(.regular.tint((Ajustes.atual.tema.widget.last ?? .black).opacity(0.5)), in: forma)
         } else {
+            // Do tema: preto no topo (some no notch) e a cor dele embaixo.
             content
-                .background(.black)
+                .background(LinearGradient(colors: Ajustes.atual.tema.widget, startPoint: .top, endPoint: .bottom))
                 .clipShape(forma)
                 .overlay { if contorno { forma.stroke(.white.opacity(0.14), lineWidth: 1) } }
         }

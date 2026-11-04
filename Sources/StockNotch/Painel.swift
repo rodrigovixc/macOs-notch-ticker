@@ -57,7 +57,14 @@ struct PainelView: View {
         }
         .frame(minWidth: 1080, minHeight: 480)
         // Vidro: a área de trabalho aparece desfocada atrás da janela, e a barra lateral flutua por cima (macOS 26+).
-        .background(FundoDeVidro().ignoresSafeArea())
+        .background {
+            ZStack {
+                FundoDeVidro()
+                LinearGradient(colors: Ajustes.atual.tema.veu, startPoint: .top, endPoint: .bottom)
+            }
+            .ignoresSafeArea()
+        }
+        .tint(Ajustes.atual.tema.destaque)
         // Controles nativos (DatePicker etc.) seguem o idioma do app, não o do sistema.
         .environment(\.locale, Ajustes.atual.idioma.locale)
     }
@@ -1208,6 +1215,17 @@ struct AjustesTela: View {
     var body: some View {
         @Bindable var ajustes = Ajustes.atual
         Form {
+            Section {
+                SeletorDeTema(ajustes: ajustes)
+            } header: {
+                Text(tr("Tema", "Theme"))
+            } footer: {
+                Text(tr("Muda a cor de destaque, o tom da janela, a linha do patrimônio e o fundo do widget. Alta e baixa continuam verde e vermelho.",
+                        "Changes the accent color, the window tint, the portfolio line and the widget background. Gains and losses stay green and red."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Section {
                 Picker(tr("Idioma", "Language"), selection: $ajustes.idioma) {
                     ForEach(Idioma.allCases) { Text($0.nome).tag($0) }
