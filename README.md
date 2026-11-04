@@ -29,7 +29,7 @@ Built with SwiftUI and AppKit, no third-party dependencies. The interface is in 
 - **Language and currency**: Brazilian Portuguese or English, and totals in BRL, USD or EUR (**Settings** in the management window). Each asset's price stays in its own currency (PETR4 in R$, AAPL in US$); position value, P&L and totals are converted with Yahoo Finance exchange rates fetched in the same refresh as the prices.
 - **Binance account sync (read-only)**: connect an API key and your spot and Simple Earn Flexible balances show up automatically. Enter your average purchase price per coin (in BRL) to include them in unrealized P&L.
 - **Price alerts**: per asset, notify when the price is above or below a value (in the asset's own currency) or when the daily change reaches ±X%. Native macOS notifications, once per crossing.
-- **Themes**: Default, Graphite, Ocean, Aurora, Sunset and Forest, in **Settings**. A theme sets the accent color, a tint over the glass window, the portfolio line and the widget background (black at the top so it still blends with the notch). Gains and losses stay green and red, and allocation colors don't change.
+- **Themes (design systems)**: eight, in **Settings**: Liquid Glass, Aurora, Swiss, Terminal, Neon, Luxury, Soft and Midnight. Each one is a design system generated with the ui-ux-pro-max library for a finance app and translated to macOS (system fonts instead of web fonts): accent color, typography (default, rounded, serif or monospaced), corner radius, card surface (glass, solid with a hairline, neon outline or neumorphic), spacing, light or dark appearance, window background, chart line, and the Overview layout: cards, compact (data-dense) or editorial (big number, sections separated by rules). Gains and losses stay green and red, and allocation colors don't change.
 - **Privacy mode**: hides amounts and quantities (`R$ ••••`) in the notch and the management window, so you can share your screen; prices and percentages stay visible. Toggle it in **Settings** or from the notch's right-click menu.
 - **Open at login**: one switch in **Settings**, using the macOS login items service.
 - **Management window**: a translucent glass window with a native table of your assets (owned, Binance balances and wishlist, tagged), transaction history (purchases and sales), price alerts and the Binance connection.
@@ -175,7 +175,7 @@ Sources/StockNotch/
 ├── Alertas.swift   # price alerts: crossing rule and native notifications
 ├── Indicadores.swift # stock indicators for the notch hover detail (Yahoo quote with crumb)
 ├── Patrimonio.swift # portfolio value over time and allocation (pure math), daily history fetch
-├── Temas.swift     # themes: accent, window tint, widget background, theme picker
+├── Temas.swift     # themes as design systems: tokens, card surfaces, window background, picker
 ├── Dashboard.swift  # Overview page: KPIs, value chart, allocation, movers, gains, wishlist
 ├── Grafico.swift   # intraday sparkline: series, fitting to the price shown, Swift Charts view
 └── Binance.swift   # signed read-only API calls and Keychain storage
