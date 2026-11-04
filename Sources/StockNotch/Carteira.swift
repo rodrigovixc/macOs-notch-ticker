@@ -181,6 +181,9 @@ final class Carteira {
     private(set) var precoMedioBinance: [String: Double] = [:]  // em reais, por moeda
     private(set) var erroBinance: (any Error)?
     private var credencial: Credencial? = Chaveiro.ler()
+    private(set) var indicadores: [String: Indicadores] = [:]  // por ativo, para o detalhe do notch
+    @ObservationIgnored private var indicadoresEm: [String: Date] = [:]
+    @ObservationIgnored private var crumb: String?
     @ObservationIgnored private var fontes = Fontes()
     @ObservationIgnored private var fila = Fila<Cotacao>()
     @ObservationIgnored private var stream: StreamBinance?
@@ -289,6 +292,21 @@ final class Carteira {
         else { return }
         ativos[i].vendas.append(venda)
         salvar()
+    }
+
+    // Ao parar o mouse numa ação no notch. No máximo a cada 5 min por ativo: os fundamentos mudam devagar, e o
+    // preço do dia vem da cotação normal. Na falha, esquece o crumb (pode ter vencido) e tenta de novo no próximo.
+    func carregarIndicadores(_ ativo: Ativo) async {
+        guard !ativo.cripto, Date.now.timeIntervalSince(indicadoresEm[ativo.id] ?? .distantPast) > 300 else { return }
+        indicadoresEm[ativo.id] = .now
+        do {
+            if crumb == nil { crumb = try await buscarCrumb() }
+            guard let c = crumb else { return }
+            indicadores[ativo.id] = try await buscarIndicadores(ativo.simboloYahoo, crumb: c)
+        } catch {
+            crumb = nil
+            indicadoresEm[ativo.id] = nil
+        }
     }
 
     // Tudo ou nada, numa gravação só. Confere de novo pelas mesmas regras da leitura: a carteira pode ter mudado

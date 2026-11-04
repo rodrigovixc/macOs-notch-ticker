@@ -610,8 +610,30 @@ struct LinhaNotch: View {
     @Environment(Carteira.self) private var carteira
     let linha: Linha
     let falhou: Bool
+    @State private var mouse = false
+    @State private var detalhe = false
 
+    // Ação: parar o mouse na linha abre os indicadores embaixo dela (cripto não tem fundamentos).
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            principal
+            if detalhe {
+                DetalheAcao(indicadores: carteira.indicadores[linha.ativo.id], moeda: linha.moeda)
+                    .transition(.opacity)
+            }
+        }
+        .contentShape(Rectangle())
+        .onHover { mouse = $0 && !linha.ativo.cripto }
+        .task(id: mouse) {
+            // A espera evita abrir cada linha por onde o mouse só passa.
+            try? await Task.sleep(for: .milliseconds(mouse ? 400 : 150))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { detalhe = mouse }
+            if mouse { await carteira.carregarIndicadores(linha.ativo) }
+        }
+    }
+
+    @ViewBuilder private var principal: some View {
         let r = carteira.resumo(linha)
         let situacao = linha.quantidade > 0 ? tr("\(qtd(linha.quantidade)) un.", "Qty \(qtd(linha.quantidade))")
             : linha.ativo.compras.isEmpty ? tr("acompanhando", "watching") : tr("posição encerrada", "position closed")
@@ -677,6 +699,64 @@ struct LinhaNotch: View {
         .lineLimit(1)
         .minimumScaleFactor(0.85)
         .accessibilityElement(children: .combine)
+    }
+}
+
+// Os principais indicadores de uma ação, em quatro colunas: o pregão de hoje, o ano e os fundamentos.
+// São dados de mercado, não da carteira: o modo privacidade não esconde.
+struct DetalheAcao: View {
+    let indicadores: Indicadores?
+    let moeda: String
+
+    var body: some View {
+        if let i = indicadores {
+            let m = i.currency ?? moeda
+            let preco = { (v: Double?) in v.map { dinheiro($0, m, oculto: false) } }
+            let itens: [(String, String?)] = [
+                (tr("Abertura", "Open"), preco(i.regularMarketOpen)),
+                (tr("Máx. do dia", "Day high"), preco(i.regularMarketDayHigh)),
+                (tr("Mín. do dia", "Day low"), preco(i.regularMarketDayLow)),
+                (tr("Fech. anterior", "Prev. close"), preco(i.regularMarketPreviousClose)),
+                (tr("Volume", "Volume"), i.regularMarketVolume.map(compacto)),
+                (tr("Vol. médio 3M", "Avg. vol. 3M"), i.averageDailyVolume3Month.map(compacto)),
+                (tr("Máx. 52 sem.", "52-wk high"), preco(i.fiftyTwoWeekHigh)),
+                (tr("Mín. 52 sem.", "52-wk low"), preco(i.fiftyTwoWeekLow)),
+                (tr("Valor de mercado", "Market cap"), i.marketCap.map { compacto($0, moeda: m) }),
+                (tr("P/L", "P/E"), i.trailingPE.map(numero2)),
+                (tr("LPA", "EPS"), preco(i.epsTrailingTwelveMonths)),
+                (tr("Div. yield", "Div. yield"), i.dividendYield.map { pct($0 / 100, sinal: false) }),
+                (tr("P/VP", "P/B"), i.priceToBook.map(numero2)),
+            ]
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), alignment: .leading, spacing: 8) {
+                ForEach(itens, id: \.0) { rotulo, valor in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(rotulo).font(.system(size: 9.5)).foregroundStyle(.secondary)
+                        Text(valor ?? "—").font(.system(size: 11, weight: .medium)).monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(10)
+            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } else {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text(tr("Buscando indicadores…", "Loading indicators…")).font(.system(size: 10.5)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func numero2(_ v: Double) -> String {
+        v.formatted(.number.precision(.fractionLength(2)).locale(Ajustes.atual.idioma.locale))
+    }
+
+    // 19.361.000 → "19,4 mi"; com moeda, "R$ 668,4 bi".
+    private func compacto(_ v: Double) -> String {
+        v.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Ajustes.atual.idioma.locale))
+    }
+
+    private func compacto(_ v: Double, moeda: String) -> String {
+        v.formatted(.currency(code: moeda).notation(.compactName).precision(.fractionLength(0...1)).locale(Ajustes.atual.idioma.locale))
     }
 }
 
