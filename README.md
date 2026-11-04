@@ -8,6 +8,14 @@ A native macOS widget that lives in the MacBook notch and shows stock and crypto
 
 Built with SwiftUI and AppKit, no third-party dependencies. The interface is in Brazilian Portuguese or English.
 
+<p align="center">
+  <img src="docs/notch.png" width="440" alt="Expanded notch: portfolio value, today's change, unrealized and realized P&L, and each asset with its price, data age badge and intraday chart">
+</p>
+<p align="center">
+  <img src="docs/portfolio.png" width="820" alt="Management window: a table with each asset's quantity, average price, price, chart, daily change, value, and unrealized and realized P&L">
+</p>
+<p align="center"><sub>A demo portfolio, in English with totals in US dollars.</sub></p>
+
 ## Features
 
 - **Notch widget**: a black panel that blends with the notch, cycles through your assets (`PETR4 ▲ 1.20%`) and expands on hover into a full portfolio view. On displays without a notch it becomes a small pill centered on the menu bar.
