@@ -166,17 +166,27 @@ final class NotchPanel: NSPanel {
 }
 
 // Rastreia o mouse mesmo com o app em segundo plano (.activeAlways).
+// .inVisibleRect: a área acompanha o tamanho da janela sozinha. Sem isso, com o widget mais largo (vários ativos,
+// estilo completo) a área podia ficar com o tamanho antigo e o mouse chegar sem o notch abrir. mouseMoved cobre o
+// mouse que já estava dentro quando a área foi refeita (não há "entrou" nesse caso).
 final class AreaNotch: NSView {
     var aoPassarMouse: (Bool) -> Void = { _ in }
+    private var dentro = false
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self))
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect], owner: self))
     }
 
-    override func mouseEntered(with event: NSEvent) { aoPassarMouse(true) }
-    override func mouseExited(with event: NSEvent) { aoPassarMouse(false) }
+    override func mouseEntered(with event: NSEvent) { marcar(true) }
+    override func mouseMoved(with event: NSEvent) { if !dentro { marcar(true) } }
+    override func mouseExited(with event: NSEvent) { marcar(false) }
+
+    private func marcar(_ valor: Bool) {
+        dentro = valor
+        aoPassarMouse(valor)
+    }
 }
 
 // O primeiro clique já aperta o botão, sem precisar ativar a janela antes.
