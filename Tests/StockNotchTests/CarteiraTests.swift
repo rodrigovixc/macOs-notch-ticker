@@ -337,6 +337,20 @@ private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(cale
     let relido = Ajustes(defaults: defaults, linguas: ["en-US"])
     #expect(relido.idioma == .pt && relido.moeda == .EUR)
     #expect(defaults.stringArray(forKey: "AppleLanguages") == ["pt-BR"])
+
+    // Widget: no notch, variação, 4 s e tudo girando até alguém mudar.
+    #expect(relido.posicao == .notch && relido.estilo == .variacao && relido.ritmo == 4)
+    #expect(relido.foraDoLetreiro.isEmpty && relido.ancoraLivre == nil)
+    relido.posicao = .livre
+    relido.estilo = .completo
+    relido.ritmo = 10
+    relido.foraDoLetreiro = ["a:AAPL", "binance:c:BNB"]
+    relido.ancoraLivre = CGPoint(x: 1720.5, y: 900)
+    let widget = Ajustes(defaults: defaults, linguas: ["en-US"])
+    #expect(widget.posicao == .livre && widget.estilo == .completo && widget.ritmo == 10)
+    #expect(widget.foraDoLetreiro == ["a:AAPL", "binance:c:BNB"] && widget.ancoraLivre == CGPoint(x: 1720.5, y: 900))
+    widget.ancoraLivre = nil
+    #expect(Ajustes(defaults: defaults, linguas: ["en-US"]).ancoraLivre == nil)
 }
 
 // Exemplo da documentação da Binance (conferido também com openssl).
