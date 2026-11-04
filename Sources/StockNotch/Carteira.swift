@@ -291,6 +291,19 @@ final class Carteira {
         salvar()
     }
 
+    // Tudo ou nada, numa gravação só. Confere de novo pelas mesmas regras da leitura: a carteira pode ter mudado
+    // enquanto a folha de importação estava aberta.
+    @discardableResult func importar(_ operacoes: [Importada]) -> Bool {
+        var novos = ativos
+        for o in operacoes {
+            if o.aplicar(em: &novos) != nil { return false }
+        }
+        ativos = novos
+        salvar()
+        Task { await atualizar() }
+        return true
+    }
+
     func remover(_ operacao: Operacao, de ativo: Ativo) {
         guard let i = ativos.firstIndex(where: { $0.id == ativo.id }), ativos[i].podeApagar(operacao) else { return }
         ativos[i].compras.removeAll { $0.id == operacao.id }

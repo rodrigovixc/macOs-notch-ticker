@@ -1,5 +1,6 @@
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 import UserNotifications
 
 struct PainelView: View {
@@ -58,6 +59,7 @@ struct CarteiraTela: View {
     @Environment(Carteira.self) private var carteira
     @State private var selecao: Ativo.ID?
     @State private var adicionando = false
+    @State private var importando = false
     @State private var registrando: Registro?
     @State private var vendoOperacoes: Ativo?
     @State private var vendoAlertas: Ativo?
@@ -86,6 +88,7 @@ struct CarteiraTela: View {
                 } actions: {
                     Button(tr("Adicionar ativo", "Add Asset")) { adicionando = true }
                         .buttonStyle(.borderedProminent)
+                    Button(tr("Importar…", "Import…")) { importando = true }
                 }
             } else {
                 tabela
@@ -120,6 +123,11 @@ struct CarteiraTela: View {
                     .disabled(semGravar)
             }
             ToolbarItem {
+                Button { importando = true } label: { Label(tr("Importar…", "Import…"), systemImage: "square.and.arrow.down") }
+                    .help(tr("Importar compras e vendas de um CSV", "Import purchases and sales from a CSV"))
+                    .disabled(semGravar)
+            }
+            ToolbarItem {
                 Button { vendoOperacoes = selecionado } label: { Label(tr("Operações", "Transactions"), systemImage: "list.bullet.rectangle") }
                     .help(tr("Ver compras e vendas do ativo selecionado (ou dê dois cliques na linha)",
                              "See the selected asset's purchases and sales (or double-click the row)"))
@@ -132,6 +140,7 @@ struct CarteiraTela: View {
             }
         }
         .sheet(isPresented: $adicionando) { FormAdicionar(fixo: nil).environment(carteira) }
+        .sheet(isPresented: $importando) { ImportarFolha().environment(carteira) }
         .sheet(item: $registrando) { FormAdicionar(fixo: $0.ativo, venda: $0.venda).environment(carteira) }
         .sheet(item: $vendoOperacoes) { OperacoesFolha(id: $0.id).environment(carteira) }
         .sheet(item: $vendoAlertas) { AlertasFolha(id: $0.id).environment(carteira) }
@@ -839,6 +848,109 @@ struct FormAdicionar: View {
         }
         .frame(width: 400)
     }
+}
+
+// Colar ou abrir um CSV (formato em Importar.swift), conferir linha a linha e gravar tudo de uma vez.
+// Linha com erro trava o botão: importar só as boas e corrigir depois duplicaria essas na segunda vez.
+struct ImportarFolha: View {
+    @Environment(Carteira.self) private var carteira
+    @Environment(\.dismiss) private var dismiss
+    @State private var texto = ""
+    @State private var escolhendo = false
+
+    var body: some View {
+        let linhas = lerCSV(texto, ativos: carteira.ativos)
+        let validas = linhas.compactMap { try? $0.resultado.get() }
+        let erros = linhas.count - validas.count
+        VStack(alignment: .leading, spacing: 12) {
+            Text(tr("Importar operações", "Import Transactions")).font(.headline)
+            Text(tr("Uma operação por linha: tipo (compra ou venda), ativo, cripto (sim ou nao), quantidade, preço e data. Ponto nos decimais, sem separador de milhar, e data ano-mês-dia. Preço em reais para B3 e cripto, em dólares para ações dos EUA.",
+                    "One transaction per line: type (buy or sell), symbol, crypto (yes or no), quantity, price and date. Decimal point, no thousands separator, and year-month-day dates. Price in reais for B3 and crypto, in dollars for US stocks."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextEditor(text: $texto)
+                .font(.system(.callout, design: .monospaced))
+                .overlay(alignment: .topLeading) {
+                    if texto.isEmpty {
+                        Text(tr("compra,PETR4,nao,200,38.40,2026-03-10\nvenda,PETR4,nao,50,47.10,2026-09-02\ncompra,BTC,sim,0.015,385000,2026-06-01",
+                                "buy,AAPL,no,10,231.50,2026-05-20\nsell,AAPL,no,4,250,2026-09-02\nbuy,BTC,yes,0.015,385000,2026-06-01"))
+                            .font(.system(.callout, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, 5)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .frame(height: 120)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(.separator))
+            List(linhas) { LinhaImportacao(linha: $0) }
+                .listStyle(.bordered(alternatesRowBackgrounds: true))
+            HStack {
+                Button(tr("Abrir arquivo…", "Open File…")) { escolhendo = true }
+                Spacer()
+                if erros > 0 {
+                    Text(tr("\(erros) linha(s) com erro", "\(erros) line(s) with errors")).foregroundStyle(.red)
+                } else if !validas.isEmpty {
+                    Text(tr("\(validas.count) operação(ões)", "\(validas.count) transaction(s)")).foregroundStyle(.secondary)
+                }
+                Button(tr("Cancelar", "Cancel"), role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                // false: a carteira mudou enquanto a folha estava aberta; a lista refaz a conta e mostra o porquê.
+                Button(tr("Importar", "Import")) { if carteira.importar(validas) { dismiss() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(validas.isEmpty || erros > 0 || carteira.erroArquivo != nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 620, height: 520)
+        .fileImporter(isPresented: $escolhendo, allowedContentTypes: [.commaSeparatedText, .plainText]) { resultado in
+            guard case .success(let url) = resultado else { return }
+            let acesso = url.startAccessingSecurityScopedResource()
+            defer { if acesso { url.stopAccessingSecurityScopedResource() } }
+            // Vai para o editor: dá para corrigir uma linha antes de importar. Planilha antiga do Excel sai em Latin-1.
+            if let lido = (try? String(contentsOf: url, encoding: .utf8)) ?? (try? String(contentsOf: url, encoding: .isoLatin1)) {
+                texto = lido
+            }
+        }
+    }
+}
+
+private struct LinhaImportacao: View {
+    let linha: LinhaCSV
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("\(linha.numero)")
+                .foregroundStyle(.tertiary)
+                .frame(width: 28, alignment: .trailing)
+            switch linha.resultado {
+            case .success(let i):
+                let moeda = i.ativo.moedaPrevista
+                // Sem ocultar no modo privacidade: são os números que a pessoa acabou de digitar ou abrir.
+                Text(i.venda ? tr("Venda", "Sale") : tr("Compra", "Purchase"))
+                    .foregroundStyle(i.venda ? .orange : .secondary)
+                    .frame(width: 64, alignment: .leading)
+                Text(i.ativo.simbolo).fontWeight(.semibold)
+                Text(quando(i.operacao.data, data: .abbreviated)).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(qtd(i.operacao.quantidade, oculto: false)) × \(dinheiro(i.operacao.preco, moeda, oculto: false))")
+                    .foregroundStyle(.secondary)
+                Text(dinheiro(i.operacao.quantidade * i.operacao.preco, moeda, oculto: false))
+                    .frame(minWidth: 110, alignment: .trailing)
+            case .failure(let falha):
+                Label(mensagem(falha), systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .help(linha.resultado.failure.map { mensagem($0) } ?? "")
+    }
+}
+
+private extension Result {
+    var failure: Failure? { if case .failure(let f) = self { f } else { nil } }
 }
 
 struct AjustesTela: View {
