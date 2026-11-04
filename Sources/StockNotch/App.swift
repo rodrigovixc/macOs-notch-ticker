@@ -54,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             // janela ficava "Untitled"; quando a ponte funciona, o título da seção substitui este.
             janela.title = "StockNotch"
             janela.styleMask.insert(.fullSizeContentView)
+            // Transparente para o vidro do painel (FundoDeVidro) mostrar o que está atrás.
+            janela.isOpaque = false
+            janela.backgroundColor = .clear
             janela.toolbarStyle = .unified
             janela.setContentSize(NSSize(width: 1240, height: 600))
             janela.isReleasedWhenClosed = false
