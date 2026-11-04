@@ -569,12 +569,27 @@ struct BinanceTela: View {
                 LabeledContent(tr("Status", "Status")) {
                     if carteira.binanceConectada {
                         Label(tr("Conectada", "Connected"), systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    } else if carteira.erroChave != nil {
+                        Label(tr("Chave salva, sem acesso", "Key saved, no access"), systemImage: "lock.trianglebadge.exclamationmark")
+                            .foregroundStyle(.orange)
                     } else {
                         Label(tr("Não conectada", "Not connected"), systemImage: "circle.dashed").foregroundStyle(.secondary)
                     }
                 }
                 if carteira.binanceConectada {
                     Button(tr("Desconectar", "Disconnect"), role: .destructive) { carteira.desconectarBinance() }
+                } else if let erroChave = carteira.erroChave {
+                    // A chave não sumiu: pedir para colar de novo seria o caminho errado.
+                    Label(mensagem(erroChave), systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    HStack {
+                        Button(tr("Desconectar", "Disconnect"), role: .destructive) { carteira.desconectarBinance() }
+                        Spacer()
+                        Button(tr("Tentar de novo", "Try Again")) {
+                            carteira.lerChave()
+                            Task { await carteira.atualizar() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 } else {
                     TextField("API Key", text: $chave, prompt: Text(tr("Cole a API Key", "Paste the API Key")))
                     SecureField("Secret Key", text: $segredo, prompt: Text(tr("Cole a Secret Key", "Paste the Secret Key")))

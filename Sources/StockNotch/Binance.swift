@@ -94,7 +94,9 @@ enum Chaveiro {
         }
     }
 
-    static func ler() -> Credencial? {
+    // nil só quando não há chave salva. Chave salva que o macOS não deixou ler (janela de permissão cancelada ou
+    // fechada, Keychain ainda trancado logo no login) é erro: dizer "não conectada" faria parecer que a chave sumiu.
+    static func ler() throws -> Credencial? {
         let busca: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: servico,
@@ -103,12 +105,18 @@ enum Chaveiro {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var resultado: CFTypeRef?
-        guard SecItemCopyMatching(busca as CFDictionary, &resultado) == errSecSuccess,
+        let status = SecItemCopyMatching(busca as CFDictionary, &resultado)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess,
               let item = resultado as? [String: Any],
               let chave = item[kSecAttrAccount as String] as? String,
               let dados = item[kSecValueData as String] as? Data,
               let segredo = String(data: dados, encoding: .utf8)
-        else { return nil }
+        else {
+            throw Falha("A chave da Binance continua salva, mas o macOS não deixou o app lê-la (erro \(status)). Clique em Tentar de novo e, na janela do macOS, em Sempre permitir.",
+                        "Your Binance key is still saved, but macOS didn't let the app read it (error \(status)). Click Try Again and, in the macOS window, Always Allow.",
+                        codigo: Int(status))
+        }
         return Credencial(chave: chave, segredo: segredo)
     }
 

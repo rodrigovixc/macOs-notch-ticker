@@ -180,7 +180,8 @@ final class Carteira {
     private(set) var saldosBinance: [String: Double] = [:]
     private(set) var precoMedioBinance: [String: Double] = [:]  // em reais, por moeda
     private(set) var erroBinance: (any Error)?
-    private var credencial: Credencial? = Chaveiro.ler()
+    private var credencial: Credencial?
+    private(set) var erroChave: Falha?  // chave salva que o macOS não deixou ler; ver lerChave()
     private(set) var indicadores: [String: Indicadores] = [:]  // por ativo, para o detalhe do notch
     @ObservationIgnored private var indicadoresEm: [String: Date] = [:]
     @ObservationIgnored private var crumb: String?
@@ -254,6 +255,7 @@ final class Carteira {
 
     init() {
         stream = StreamBinance { [weak self] moeda, cotacao in self?.receber(moeda, cotacao) }
+        lerChave()
         do {
             guard let lido = try Arquivo.abrir(arquivo) else { return }
             ativos = lido.ativos
@@ -364,14 +366,27 @@ final class Carteira {
         await atualizar()
     }
 
+    // Logo no login o Keychain pode estar trancado: atualizar() tenta de novo sozinho nesse caso. Recusada ou fechada a
+    // janela de permissão, só pelo botão Tentar de novo, senão a janela voltaria a cada 10 s.
+    func lerChave() {
+        do {
+            credencial = try Chaveiro.ler()
+            erroChave = nil
+        } catch {
+            erroChave = error as? Falha
+        }
+    }
+
     func desconectarBinance() {
         Chaveiro.apagar()
         credencial = nil
+        erroChave = nil
         saldosBinance = [:]
         erroBinance = nil
     }
 
     func atualizar() async {
+        if credencial == nil, erroChave?.codigo == Int(errSecInteractionNotAllowed) { lerChave() }
         // A conta pode mudar durante o pedido (desconectar, outra chave): o resultado só vale para a que pediu.
         if let usada = credencial {
             do {

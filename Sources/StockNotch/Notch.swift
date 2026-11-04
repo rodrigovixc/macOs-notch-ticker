@@ -564,7 +564,7 @@ struct NotchView: View {
 
     private var aviso: String? {
         if let erro = carteira.erroArquivo { return mensagem(erro) }
-        if let erro = carteira.erroBinance { return "Binance: \(mensagem(erro))" }
+        if let erro = carteira.erroChave ?? carteira.erroBinance { return "Binance: \(mensagem(erro))" }
         let semCotacao = carteira.simbolosSemCotacao.joined(separator: ", ")
         if !semCotacao.isEmpty { return tr("Sem cotação: \(semCotacao)", "No quote: \(semCotacao)") }
         guard let paradas = carteira.paradas else { return nil }
