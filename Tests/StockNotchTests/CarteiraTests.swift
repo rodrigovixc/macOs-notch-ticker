@@ -351,6 +351,11 @@ private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(cale
     #expect(widget.foraDoLetreiro == ["a:AAPL", "binance:c:BNB"] && widget.ancoraLivre == CGPoint(x: 1720.5, y: 900))
     widget.ancoraLivre = nil
     #expect(Ajustes(defaults: defaults, linguas: ["en-US"]).ancoraLivre == nil)
+
+    // Tema: Padrão até escolher; a escolha volta ao reabrir.
+    #expect(widget.tema == .padrao)
+    widget.tema = .aurora
+    #expect(Ajustes(defaults: defaults, linguas: ["en-US"]).tema == .aurora)
 }
 
 // Exemplo da documentação da Binance (conferido também com openssl).
