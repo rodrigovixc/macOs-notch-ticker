@@ -45,3 +45,43 @@ func buscarIndicadores(_ simbolo: String, crumb: String) async throws -> Indicad
     guard let i = r.quoteResponse.result.first else { throw URLError(.badServerResponse) }
     return i
 }
+
+// Busca de ativos pelo nome ou código, para o formulário de adicionar ("petro" acha PETR4, "bitcoin" acha BTC).
+struct Sugestao: Identifiable, Hashable {
+    let simbolo: String  // como o app guarda: PETR4 (sem .SA), BTC (sem -USD)
+    let nome: String
+    let cripto: Bool
+    let bolsa: String
+    var id: String { (cripto ? "c:" : "a:") + simbolo }
+}
+
+struct RespostaBusca: Decodable {
+    struct Item: Decodable {
+        let symbol: String
+        let shortname: String?
+        let longname: String?
+        let quoteType: String?
+        let exchDisp: String?
+    }
+    let quotes: [Item]?
+
+    // Só o que o app acompanha: ações, ETFs e cripto cotada em dólar (vira a moeda da Binance). Fundos, futuros e
+    // índices ficam de fora; o mesmo ativo em duas listagens aparece uma vez.
+    var sugestoes: [Sugestao] {
+        var vistas = Set<String>()
+        return (quotes ?? []).compactMap { q -> Sugestao? in
+            let cripto = q.quoteType == "CRYPTOCURRENCY"
+            guard cripto ? q.symbol.hasSuffix("-USD") : ["EQUITY", "ETF"].contains(q.quoteType ?? "") else { return nil }
+            let simbolo = cripto ? String(q.symbol.dropLast(4)) : q.symbol.hasSuffix(".SA") ? String(q.symbol.dropLast(3)) : q.symbol
+            let nome = (q.longname ?? q.shortname ?? simbolo).split(separator: " ").joined(separator: " ")
+            let s = Sugestao(simbolo: simbolo, nome: nome, cripto: cripto, bolsa: cripto ? "Cripto" : q.exchDisp ?? "")
+            return vistas.insert(s.id).inserted ? s : nil
+        }
+    }
+}
+
+func buscarAtivos(_ texto: String) async throws -> [Sugestao] {
+    let q = texto.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? texto
+    let r: RespostaBusca = try await baixar("https://query1.finance.yahoo.com/v1/finance/search?q=\(q)&quotesCount=10&newsCount=0&listsCount=0")
+    return r.sugestoes
+}

@@ -56,6 +56,8 @@ struct Linha: Identifiable {
     var realizado = 0.0
     var binance = false
     var id: String { (binance ? "binance:" : "") + ativo.id }
+    // Lista de desejos: ativo manual sem compra nem venda, só acompanhado. Saldo da Binance é sempre comprado.
+    var desejo: Bool { !binance && ativo.compras.isEmpty && ativo.vendas.isEmpty }
     var valor: Double? { cotacao.map { $0.preco * quantidade } }
     var moeda: String { cotacao?.moeda ?? ativo.moedaPrevista }
     // Compras, vendas e preço médio da Binance: cripto em reais (como o formulário pede), mesmo com a cotação em dólar.

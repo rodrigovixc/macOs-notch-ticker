@@ -159,7 +159,8 @@ struct CarteiraTela: View {
     }
 
     private var tabela: some View {
-        Table(carteira.linhas, selection: $selecao) {
+        // Comprados primeiro, a lista de desejos embaixo.
+        Table(carteira.linhas.filter { !$0.desejo } + carteira.linhas.filter(\.desejo), selection: $selecao) {
             TableColumn(tr("Ativo", "Asset")) { l in
                 HStack(spacing: 8) {
                     Monograma(ativo: l.ativo, tamanho: 22)
@@ -175,7 +176,10 @@ struct CarteiraTela: View {
                                     .accessibilityLabel(tr("\(n) alerta(s) de preço", "\(n) price alert(s)"))
                             }
                         }
-                        Text(l.ativo.cripto ? tr("Cripto", "Crypto") : tr("Ação", "Stock")).font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Etiqueta.tipo(l.ativo.cripto)
+                            if l.desejo { Etiqueta.desejo }
+                        }
                     }
                 }
                 .padding(.vertical, 2)
@@ -752,6 +756,9 @@ struct FormAdicionar: View {
     @State private var quantidade = ""
     @State private var preco = ""
     @State private var data = Date.now
+    @State private var desejo = false
+    @State private var sugestoes: [Sugestao] = []
+    @State private var escolhida: Sugestao?
 
     // Venda só de ativo que já está na carteira.
     init(fixo: Ativo?, venda: Bool = false) {
@@ -781,9 +788,9 @@ struct FormAdicionar: View {
 
     private var semCompra: Bool { quantidade.isEmpty && preco.isEmpty }
 
-    // Ativo novo pode entrar sem compra (só acompanha); "Registrar" exige a operação.
+    // Na lista de desejos o ativo entra sem compra; comprado (e "Registrar") exige a operação.
     private var valido: Bool {
-        !codigo.isEmpty && ((fixo == nil && semCompra) || (operacao != nil && problema == nil))
+        !codigo.isEmpty && ((fixo == nil && desejo) || (operacao != nil && problema == nil))
     }
 
     var body: some View {
@@ -797,13 +804,27 @@ struct FormAdicionar: View {
                     }
                     .pickerStyle(.segmented)
                 } else {
+                    Picker(tr("Entra como", "Add as"), selection: $desejo) {
+                        Label(tr("Comprado", "Owned"), systemImage: "bag.fill").tag(false)
+                        Label(tr("Lista de desejos", "Wishlist"), systemImage: "star.fill").tag(true)
+                    }
+                    .pickerStyle(.segmented)
                     Picker(tr("Tipo", "Type"), selection: $cripto) {
                         Text(tr("Ação", "Stock")).tag(false)
                         Text(tr("Cripto", "Crypto")).tag(true)
                     }
                     .pickerStyle(.segmented)
-                    TextField(tr("Código", "Symbol"), text: $simbolo, prompt: Text(cripto ? "BTC, ETH, SOL" : "PETR4, VALE3, AAPL"))
+                    TextField(tr("Buscar", "Search"), text: $simbolo,
+                              prompt: Text(tr("Nome ou código: Petrobras, PETR4, Bitcoin", "Name or symbol: Apple, AAPL, Bitcoin")))
+                    if let escolhida, escolhida.simbolo == simbolo {
+                        Text(escolhida.nome).font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(sugestoes) { s in
+                        Button { escolher(s) } label: { LinhaSugestao(sugestao: s) }
+                            .buttonStyle(.plain)
+                    }
                 }
+                if fixo != nil || !desejo {
                 Section {
                     // Exemplos no formato do idioma, que é o que numero(_:idioma:) entende.
                     TextField(tr("Quantidade", "Quantity"), text: $quantidade, prompt: Text(ehCripto ? tr("0,05", "0.05") : "100"))
@@ -835,27 +856,43 @@ struct FormAdicionar: View {
                             .foregroundStyle(.red)
                     }
                 } header: {
-                    Text(venda ? tr("Venda", "Sale") : fixo == nil ? tr("Compra (opcional)", "Purchase (optional)") : tr("Compra", "Purchase"))
+                    Text(venda ? tr("Venda", "Sale") : tr("Compra", "Purchase"))
                 } footer: {
                     let moedas = tr("Preço em reais para B3 e cripto, em dólares para ações dos EUA.",
                                     "Price in reais for B3 and crypto, in dollars for US stocks.")
-                    let texto = venda ? tr("O lucro realizado é o preço de venda menos o preço médio na data. ", "Realized gain is the sale price minus the average cost on that date. ")
-                        : fixo == nil ? tr("Deixe em branco para só acompanhar a cotação. ", "Leave blank to just follow the price. ") : ""
+                    let texto = venda ? tr("O lucro realizado é o preço de venda menos o preço médio na data. ", "Realized gain is the sale price minus the average cost on that date. ") : ""
                     Text(texto + moedas)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                } else {
+                    Text(tr("Na lista de desejos o ativo só é acompanhado: aparece no notch e no letreiro, com cotação, gráfico e alertas, mas não entra no patrimônio. Ao registrar uma compra, ele passa a contar.",
+                            "On the wishlist the asset is only followed: it shows in the notch and the ticker, with price, chart and alerts, but doesn't count toward your portfolio value. Record a purchase and it starts counting."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)
+            // Busca enquanto digita, com uma pausa para não pedir a cada letra. Escolher uma sugestão encerra a busca.
+            .task(id: simbolo) {
+                guard fixo == nil, simbolo.count >= 2, simbolo != escolhida?.simbolo else { return sugestoes = [] }
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled, let achadas = try? await buscarAtivos(simbolo) else { return }
+                // Em português, ou com o Mac na região Brasil (inglês em en-BR), a B3 vem primeiro: "petro" acha PETR4
+                // antes das Petroleum americanas.
+                let brasil = Ajustes.atual.idioma == .pt || Locale.current.region?.identifier == "BR"
+                let b3 = brasil ? achadas.filter { $0.bolsa == "São Paulo" } : []
+                sugestoes = Array((b3 + achadas.filter { !b3.contains($0) }).prefix(8))
+            }
             HStack {
                 Spacer()
                 Button(tr("Cancelar", "Cancel"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(fixo == nil ? tr("Adicionar", "Add") : tr("Registrar", "Record")) {
+                Button(fixo != nil ? tr("Registrar", "Record") : desejo ? tr("Adicionar à lista", "Add to Wishlist") : tr("Adicionar", "Add")) {
                     if venda, let fixo, let operacao {
                         carteira.vender(operacao, de: fixo)
                     } else {
-                        carteira.adicionar(simbolo: codigo, cripto: ehCripto, compra: operacao)
+                        carteira.adicionar(simbolo: codigo, cripto: ehCripto, compra: fixo == nil && desejo ? nil : operacao)
                     }
                     dismiss()
                 }
@@ -864,8 +901,58 @@ struct FormAdicionar: View {
             }
             .padding()
         }
-        .frame(width: 400)
+        .frame(width: 440)
     }
+
+    private func escolher(_ s: Sugestao) {
+        escolhida = s
+        cripto = s.cripto
+        simbolo = s.simbolo
+        sugestoes = []
+    }
+}
+
+private struct LinhaSugestao: View {
+    let sugestao: Sugestao
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Monograma(ativo: Ativo(simbolo: sugestao.simbolo, cripto: sugestao.cripto), tamanho: 20)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(sugestao.simbolo).fontWeight(.semibold)
+                Text(sugestao.nome).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            Text(sugestao.bolsa).font(.caption).foregroundStyle(.tertiary)
+            Etiqueta.tipo(sugestao.cripto)
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+// Ação ou cripto, comprado ou lista de desejos: cor e ícone além do texto.
+struct Etiqueta: View {
+    let texto: String
+    let icone: String
+    let cor: Color
+
+    var body: some View {
+        Label(texto, systemImage: icone)
+            .font(.system(size: 9.5, weight: .semibold))
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .foregroundStyle(cor)
+            .background(cor.opacity(0.15), in: Capsule())
+            .fixedSize()
+    }
+
+    @MainActor static func tipo(_ cripto: Bool) -> Etiqueta {
+        cripto ? Etiqueta(texto: tr("Cripto", "Crypto"), icone: "bitcoinsign.circle.fill", cor: .orange)
+            : Etiqueta(texto: tr("Ação", "Stock"), icone: "building.columns.fill", cor: .blue)
+    }
+
+    @MainActor static var desejo: Etiqueta { Etiqueta(texto: tr("Desejo", "Wishlist"), icone: "star.fill", cor: .yellow) }
 }
 
 // Colar ou abrir um CSV (formato em Importar.swift), conferir linha a linha e gravar tudo de uma vez.

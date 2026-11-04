@@ -540,18 +540,20 @@ struct NotchView: View {
     }
 
     private var lista: some View {
-        let manuais = Array(carteira.linhas.prefix(maximoLinhas))
+        // Comprados, Binance e a lista de desejos, nessa ordem, até o limite de linhas.
+        let manuais = Array(carteira.linhas.filter { !$0.desejo }.prefix(maximoLinhas))
         let binance = Array(carteira.linhasBinance.prefix(maximoLinhas - manuais.count))
-        let ocultos = carteira.linhas.count + carteira.linhasBinance.count - manuais.count - binance.count
+        let desejos = Array(carteira.linhas.filter(\.desejo).prefix(maximoLinhas - manuais.count - binance.count))
+        let ocultos = carteira.linhas.count + carteira.linhasBinance.count - manuais.count - binance.count - desejos.count
         return VStack(alignment: .leading, spacing: 10) {
             ForEach(manuais) { LinhaNotch(linha: $0, falhou: carteira.falhas.contains($0.ativo.id)) }
             if !binance.isEmpty {
-                Text("BINANCE")
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, manuais.isEmpty ? 0 : 4)
+                secao("BINANCE", primeira: manuais.isEmpty)
                 ForEach(binance) { LinhaNotch(linha: $0, falhou: carteira.falhas.contains($0.ativo.id)) }
+            }
+            if !desejos.isEmpty {
+                secao(tr("LISTA DE DESEJOS", "WISHLIST"), icone: "star.fill", primeira: manuais.isEmpty && binance.isEmpty)
+                ForEach(desejos) { LinhaNotch(linha: $0, falhou: carteira.falhas.contains($0.ativo.id)) }
             }
             if ocultos > 0 {
                 Button(tr("Mais \(ocultos) no painel", "\(ocultos) more in StockNotch"), action: abrirPainel)
@@ -560,6 +562,16 @@ struct NotchView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func secao(_ titulo: String, icone: String? = nil, primeira: Bool) -> some View {
+        HStack(spacing: 4) {
+            if let icone { Image(systemName: icone).foregroundStyle(.yellow) }
+            Text(titulo).tracking(0.6)
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .padding(.top, primeira ? 0 : 4)
     }
 
     private var aviso: String? {
@@ -636,12 +648,13 @@ struct LinhaNotch: View {
     @ViewBuilder private var principal: some View {
         let r = carteira.resumo(linha)
         let situacao = linha.quantidade > 0 ? tr("\(qtd(linha.quantidade)) un.", "Qty \(qtd(linha.quantidade))")
-            : linha.ativo.compras.isEmpty ? tr("acompanhando", "watching") : tr("posição encerrada", "position closed")
+            : linha.desejo ? tr("lista de desejos", "wishlist") : tr("posição encerrada", "position closed")
         HStack(spacing: 10) {
             Monograma(ativo: linha.ativo)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(linha.ativo.simbolo).font(.system(size: 13, weight: .semibold))
+                    if linha.desejo { Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(.yellow) }
                     if let c = linha.cotacao {
                         SeloCotacao(cotacao: c, agora: carteira.agora)
                             .font(.system(size: 10))
