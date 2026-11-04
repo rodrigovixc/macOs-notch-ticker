@@ -166,7 +166,7 @@ struct CarteiraTela: View {
         let linhas = carteira.linhas.filter { !$0.desejo } + carteira.linhasBinance + carteira.linhas.filter(\.desejo)
         return Table(linhas, selection: $selecao) {
             TableColumn(tr("Ativo", "Asset")) { l in
-                HStack(spacing: 8) {
+                CelulaAtivo(carteira: carteira, linha: l) { HStack(spacing: 8) {
                     Monograma(ativo: l.ativo, tamanho: 22)
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 4) {
@@ -187,7 +187,7 @@ struct CarteiraTela: View {
                         }
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, 2) }
             }
             .width(min: 90, ideal: 110)
             TableColumn(tr("Quantidade", "Quantity")) { l in
@@ -939,6 +939,37 @@ private struct LinhaSugestao: View {
             Etiqueta.tipo(sugestao.cripto)
         }
         .contentShape(Rectangle())
+    }
+}
+
+// Na tabela, parar o mouse numa ação abre os mesmos indicadores do notch num balão ao lado.
+// A carteira vem por parâmetro: as células da Table não recebem o .environment(carteira) e o app cairia.
+private struct CelulaAtivo<Conteudo: View>: View {
+    let carteira: Carteira
+    let linha: Linha
+    @ViewBuilder let conteudo: Conteudo
+    @State private var mouse = false
+    @State private var balao = false
+
+    var body: some View {
+        conteudo
+            .contentShape(Rectangle())
+            .onHover { mouse = $0 && !linha.ativo.cripto }
+            .task(id: mouse) {
+                // A espera evita abrir um balão em cada linha por onde o mouse só passa.
+                try? await Task.sleep(for: .milliseconds(mouse ? 500 : 250))
+                guard !Task.isCancelled else { return }
+                balao = mouse
+                if mouse { await carteira.carregarIndicadores(linha.ativo) }
+            }
+            .popover(isPresented: $balao, arrowEdge: .trailing) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(linha.ativo.simbolo).font(.headline)
+                    DetalheAcao(indicadores: carteira.indicadores[linha.ativo.id], moeda: linha.moeda)
+                }
+                .padding(14)
+                .frame(width: 460)
+            }
     }
 }
 
