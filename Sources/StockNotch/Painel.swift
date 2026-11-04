@@ -53,6 +53,8 @@ struct PainelView: View {
             }
         }
         .frame(minWidth: 1080, minHeight: 480)
+        // Vidro: a área de trabalho aparece desfocada atrás da janela, e a barra lateral flutua por cima (macOS 26+).
+        .background(FundoDeVidro().ignoresSafeArea())
         // Controles nativos (DatePicker etc.) seguem o idioma do app, não o do sistema.
         .environment(\.locale, Ajustes.atual.idioma.locale)
     }
@@ -82,7 +84,7 @@ struct CarteiraTela: View {
                 } actions: {
                     Button(tr("Mostrar no Finder", "Show in Finder")) { mostrarNoFinder(carteira.arquivo) }
                 }
-            } else if carteira.ativos.isEmpty {
+            } else if carteira.ativos.isEmpty && carteira.linhasBinance.isEmpty {
                 ContentUnavailableView {
                     Label(tr("Nenhum ativo", "No assets"), systemImage: "chart.line.uptrend.xyaxis")
                 } description: {
@@ -159,8 +161,10 @@ struct CarteiraTela: View {
     }
 
     private var tabela: some View {
-        // Comprados primeiro, a lista de desejos embaixo.
-        Table(carteira.linhas.filter { !$0.desejo } + carteira.linhas.filter(\.desejo), selection: $selecao) {
+        // Comprados, saldos da Binance e a lista de desejos, nessa ordem (como no notch). Linha da Binance não tem
+        // operações nem alertas no app: o menu e os botões da barra de ferramentas ficam sem efeito nela.
+        let linhas = carteira.linhas.filter { !$0.desejo } + carteira.linhasBinance + carteira.linhas.filter(\.desejo)
+        return Table(linhas, selection: $selecao) {
             TableColumn(tr("Ativo", "Asset")) { l in
                 HStack(spacing: 8) {
                     Monograma(ativo: l.ativo, tamanho: 22)
@@ -177,7 +181,8 @@ struct CarteiraTela: View {
                             }
                         }
                         HStack(spacing: 4) {
-                            Etiqueta.tipo(l.ativo.cripto)
+                            // Da Binance é sempre cripto: a etiqueta diz de onde vem, e o círculo do monograma, o tipo.
+                            if l.binance { Etiqueta.binance } else { Etiqueta.tipo(l.ativo.cripto) }
                             if l.desejo { Etiqueta.desejo }
                         }
                     }
@@ -192,7 +197,8 @@ struct CarteiraTela: View {
             .alignment(.trailing)
             // Preço médio na moeda das compras e cotação na do ativo; valor e resultado na moeda escolhida.
             TableColumn(tr("Preço médio", "Avg. Price")) { l in
-                Text(valor: l.quantidade > 0 ? dinheiro((l.custo ?? 0) / l.quantidade, l.moedaCusto) : "—")
+                // Saldo da Binance sem preço médio informado não tem custo: "—", não R$ 0,00.
+                Text(valor: l.quantidade > 0 && l.custo != nil ? dinheiro((l.custo ?? 0) / l.quantidade, l.moedaCusto) : "—")
             }
             .width(min: 85, ideal: 100)
             .alignment(.trailing)
@@ -255,6 +261,9 @@ struct CarteiraTela: View {
             .width(min: 80, ideal: 100)
             .alignment(.trailing)
         }
+        // Sem fundo nem faixas: as linhas ficam sobre o vidro da janela.
+        .scrollContentBackground(.hidden)
+        .alternatingRowBackgrounds(.disabled)
         .monospacedDigit()
         // Coluna estreita: o número encolhe um pouco em vez de virar "…".
         .lineLimit(1)
@@ -507,6 +516,7 @@ struct AlertasFolha: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)  // os grupos ficam como cartões sobre o vidro
 
             HStack {
                 Spacer()
@@ -677,6 +687,7 @@ struct BinanceTela: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)  // os grupos ficam como cartões sobre o vidro
         .navigationTitle("Binance")
         .toolbar {
             ToolbarItem {
@@ -873,6 +884,7 @@ struct FormAdicionar: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)  // os grupos ficam como cartões sobre o vidro
             // Busca enquanto digita, com uma pausa para não pedir a cada letra. Escolher uma sugestão encerra a busca.
             .task(id: simbolo) {
                 guard fixo == nil, simbolo.count >= 2, simbolo != escolhida?.simbolo else { return sugestoes = [] }
@@ -930,6 +942,19 @@ private struct LinhaSugestao: View {
     }
 }
 
+// Fundo de janela translúcido, desfocando o que está atrás dela.
+struct FundoDeVidro: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let vidro = NSVisualEffectView()
+        vidro.material = .underWindowBackground
+        vidro.blendingMode = .behindWindow
+        vidro.state = .followsWindowActiveState
+        return vidro
+    }
+
+    func updateNSView(_ vidro: NSVisualEffectView, context: Context) {}
+}
+
 // Ação ou cripto, comprado ou lista de desejos: cor e ícone além do texto.
 struct Etiqueta: View {
     let texto: String
@@ -951,6 +976,8 @@ struct Etiqueta: View {
         cripto ? Etiqueta(texto: tr("Cripto", "Crypto"), icone: "bitcoinsign.circle.fill", cor: .orange)
             : Etiqueta(texto: tr("Ação", "Stock"), icone: "building.columns.fill", cor: .blue)
     }
+
+    @MainActor static var binance: Etiqueta { Etiqueta(texto: "Binance", icone: "link", cor: .yellow) }
 
     @MainActor static var desejo: Etiqueta { Etiqueta(texto: tr("Desejo", "Wishlist"), icone: "star.fill", cor: .yellow) }
 }
@@ -1131,6 +1158,7 @@ struct WidgetTela: View {
             .disabled(ajustes.estilo == .total)
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)  // os grupos ficam como cartões sobre o vidro
         .navigationTitle("Widget")
     }
 
@@ -1174,6 +1202,7 @@ struct AjustesTela: View {
             SecaoAbrirComMac()
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)  // os grupos ficam como cartões sobre o vidro
         .navigationTitle(tr("Ajustes", "Settings"))
     }
 }
