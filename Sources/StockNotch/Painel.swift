@@ -5,13 +5,14 @@ import UserNotifications
 
 struct PainelView: View {
     enum Secao: CaseIterable, Identifiable {
-        case carteira, binance, ajustes
+        case carteira, binance, widget, ajustes
         var id: Self { self }
 
         var icone: String {
             switch self {
             case .carteira: "briefcase"
             case .binance: "link"
+            case .widget: "menubar.rectangle"
             case .ajustes: "gearshape"
             }
         }
@@ -20,6 +21,7 @@ struct PainelView: View {
             switch self {
             case .carteira: tr("Carteira", "Portfolio")
             case .binance: "Binance"
+            case .widget: "Widget"
             case .ajustes: tr("Ajustes", "Settings")
             }
         }
@@ -46,6 +48,7 @@ struct PainelView: View {
             switch secao ?? .carteira {
             case .carteira: CarteiraTela()
             case .binance: BinanceTela()
+            case .widget: WidgetTela()
             case .ajustes: AjustesTela()
             }
         }
@@ -951,6 +954,81 @@ private struct LinhaImportacao: View {
 
 private extension Result {
     var failure: Failure? { if case .failure(let f) = self { f } else { nil } }
+}
+
+// Onde o widget fica, o que ele mostra fechado e quais ativos giram no letreiro. Muda na hora, sem reabrir.
+struct WidgetTela: View {
+    @Environment(Carteira.self) private var carteira
+
+    var body: some View {
+        @Bindable var ajustes = Ajustes.atual
+        let linhas = carteira.linhas + carteira.linhasBinance
+        let girando = linhas.filter { !ajustes.foraDoLetreiro.contains($0.id) }.count
+        Form {
+            Section {
+                Picker(tr("Posição", "Position"), selection: $ajustes.posicao) {
+                    Text(tr("No notch, no topo da tela", "In the notch, at the top of the screen")).tag(PosicaoWidget.notch)
+                    Text(tr("Solto, onde você arrastar", "Floating, wherever you drag it")).tag(PosicaoWidget.livre)
+                }
+                .pickerStyle(.radioGroup)
+                if ajustes.posicao == .livre {
+                    Button(tr("Voltar para o topo da tela", "Move Back to the Top of the Screen")) { ajustes.ancoraLivre = nil }
+                        .disabled(ajustes.ancoraLivre == nil)
+                }
+            } footer: {
+                nota(tr("Solto, arraste o widget com o mouse para qualquer lugar, em qualquer tela. Ele lembra onde ficou.",
+                        "When floating, drag the widget anywhere, on any display. It remembers where you left it."))
+            }
+            Section {
+                Picker(tr("Mostrar", "Show"), selection: $ajustes.estilo) {
+                    Text(tr("Ativo e variação do dia (PETR4 ▲ 1,20%)", "Asset and daily change (PETR4 ▲ 1.20%)")).tag(EstiloWidget.variacao)
+                    Text(tr("Ativo e cotação (PETR4 R$ 50,12)", "Asset and price (PETR4 R$50.12)")).tag(EstiloWidget.preco)
+                    Text(tr("Ativo, cotação e variação", "Asset, price and change")).tag(EstiloWidget.completo)
+                    Text(tr("Total da carteira e variação do dia, sem girar", "Portfolio total and daily change, no rotation")).tag(EstiloWidget.total)
+                }
+                .pickerStyle(.radioGroup)
+            } header: {
+                Text(tr("Fechado", "Collapsed"))
+            } footer: {
+                nota(tr("Passe o mouse no widget para ver a carteira inteira.", "Hover over the widget to see your whole portfolio."))
+            }
+            Section {
+                Picker(tr("Trocar a cada", "Switch every"), selection: $ajustes.ritmo) {
+                    ForEach([2, 4, 6, 10], id: \.self) { Text("\($0) s").tag($0) }
+                }
+                .pickerStyle(.segmented)
+                if linhas.isEmpty {
+                    Text(tr("Adicione ativos na Carteira ou conecte a Binance.", "Add assets in Portfolio or connect Binance."))
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(linhas) { l in
+                    Toggle(isOn: Binding(get: { !Ajustes.atual.foraDoLetreiro.contains(l.id) },
+                                         set: { if $0 { Ajustes.atual.foraDoLetreiro.remove(l.id) } else { Ajustes.atual.foraDoLetreiro.insert(l.id) } })) {
+                        HStack(spacing: 8) {
+                            Monograma(ativo: l.ativo, tamanho: 18)
+                            Text(l.ativo.simbolo)
+                            if l.binance { Text("Binance").foregroundStyle(.secondary) }
+                        }
+                    }
+                }
+            } header: {
+                Text(tr("Letreiro", "Ticker"))
+            } footer: {
+                nota(linhas.isEmpty ? "" : tr("\(girando) de \(linhas.count) ativos giram no widget. Ativo novo entra girando.",
+                                              "\(girando) of \(linhas.count) assets rotate in the widget. New assets are included."))
+            }
+            .disabled(ajustes.estilo == .total)
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Widget")
+    }
+
+    private func nota(_ texto: String) -> some View {
+        Text(texto)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 struct AjustesTela: View {

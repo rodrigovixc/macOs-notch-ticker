@@ -5,6 +5,11 @@ struct NotchGeometria {
     var largura: CGFloat
     var altura: CGFloat
 
+    // Solto não há notch para contornar: uma pílula só, sem o vão do meio.
+    static let solta = NotchGeometria(largura: 0, altura: 26)
+}
+
+extension NotchGeometria {
     init(_ tela: NSScreen?) {
         guard let tela else {
             largura = 0
@@ -48,6 +53,20 @@ final class NotchPanel: NSPanel {
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.montar() }
         }
+        observar()
+    }
+
+    // Trocar entre notch e solto, ou "voltar para o topo" nos Ajustes, sem o tamanho mudar: reposiciona mesmo assim.
+    private func observar() {
+        withObservationTracking {
+            _ = Ajustes.atual.posicao
+            _ = Ajustes.atual.ancoraLivre
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.posicionar()
+                self?.observar()
+            }
+        }
     }
 
     // Não rouba o teclado do app em que você está.
@@ -56,7 +75,8 @@ final class NotchPanel: NSPanel {
     private func montar() {
         let view = NotchView(geometria: NotchGeometria(Self.tela), estado: estado, abrirPainel: abrirPainel,
                              mouseNaJanela: { [weak self] in self?.frame.contains(NSEvent.mouseLocation) ?? false },
-                             aoMudarTamanho: { [weak self] in self?.ajustar($0) })
+                             aoMudarTamanho: { [weak self] in self?.ajustar($0) },
+                             arrastar: { [weak self] in self?.arrastar($0) })
         let host = HospedeiroNotch(rootView: AnyView(view.environment(carteira)))
         host.sizingOptions = []
         host.autoresizingMask = [.width, .height]
@@ -79,10 +99,47 @@ final class NotchPanel: NSPanel {
         }
     }
 
+    // Topo e centro do widget: o notch, ou onde ele foi solto (de início, logo abaixo da barra de menus).
+    private var ancora: CGPoint {
+        if Ajustes.atual.posicao == .livre {
+            if let ancora = Ajustes.atual.ancoraLivre { return ancora }
+            let area = (NSScreen.main ?? Self.tela)?.visibleFrame ?? .zero
+            return CGPoint(x: area.midX, y: area.maxY - 8)
+        }
+        let tela = Self.tela?.frame ?? .zero
+        return CGPoint(x: tela.midX, y: tela.maxY)
+    }
+
     private func posicionar() {
-        guard let tela = Self.tela?.frame else { return }
-        setFrame(NSRect(x: tela.midX - tamanho.width / 2, y: tela.maxY - tamanho.height,
-                        width: tamanho.width, height: tamanho.height), display: true)
+        let livre = Ajustes.atual.posicao == .livre
+        var quadro = NSRect(x: ancora.x - tamanho.width / 2, y: ancora.y - tamanho.height, width: tamanho.width, height: tamanho.height)
+        // Solto não sai da tela: aberto perto da borda, desliza para dentro.
+        if livre, let area = (NSScreen.screens.first { $0.frame.contains(ancora) } ?? NSScreen.main)?.visibleFrame {
+            quadro.origin.x = min(max(quadro.minX, area.minX), area.maxX - quadro.width)
+            quadro.origin.y = min(max(quadro.minY, area.minY), area.maxY - quadro.height)
+        }
+        hasShadow = livre  // no notch a sombra apareceria em volta do preto da barra de menus
+        setFrame(quadro, display: true)
+        invalidateShadow()
+    }
+
+    // Solto, arrastar move o widget (fechado ou aberto). A conta é em coordenadas de tela: as da view andam junto
+    // com a janela. O ponto vem do gesto, na janela (topo à esquerda), e vira ponto de tela pelo quadro dela.
+    private var arrasto: (mouse: CGPoint, ancora: CGPoint)?
+
+    private func arrastar(_ ponto: CGPoint?) {
+        guard Ajustes.atual.posicao == .livre else { return }
+        guard let ponto else {
+            // Guarda onde ficou de fato: perto da borda, a janela foi empurrada para dentro.
+            if arrasto != nil { Ajustes.atual.ancoraLivre = CGPoint(x: frame.midX, y: frame.maxY) }
+            arrasto = nil
+            return
+        }
+        let mouse = CGPoint(x: frame.minX + ponto.x, y: frame.maxY - ponto.y)
+        let inicio = arrasto ?? (mouse, ancora)
+        arrasto = inicio
+        Ajustes.atual.ancoraLivre = CGPoint(x: inicio.ancora.x + mouse.x - inicio.mouse.x, y: inicio.ancora.y + mouse.y - inicio.mouse.y)
+        posicionar()
     }
 }
 
@@ -113,21 +170,43 @@ struct NotchView: View {
     let abrirPainel: () -> Void
     let mouseNaJanela: () -> Bool
     let aoMudarTamanho: (CGSize) -> Void
+    let arrastar: (CGPoint?) -> Void  // ponto do mouse na janela; nil ao soltar
 
     @State private var expandido = false
     @State private var indice = 0
 
-    private let orelha: CGFloat = 80
     private let larguraAberta: CGFloat = 480  // cabe o minigráfico ao lado do preço
+
+    private var livre: Bool { Ajustes.atual.posicao == .livre }
+    private var geo: NotchGeometria { livre ? .solta : geometria }
+
+    // Largura de cada lado do notch fechado, pelo que ele mostra (o mais largo: "R$ 428.753,68 ▲ 1,23%").
+    private var orelha: CGFloat {
+        switch Ajustes.atual.estilo {
+        case .variacao: 80
+        case .preco: 110
+        case .total: 120
+        case .completo: 170
+        }
+    }
     private let maximoLinhas = 10
 
     private var animacao: Animation {
         reduzirMovimento ? .easeOut(duration: 0.15) : .spring(response: 0.36, dampingFraction: 0.82)
     }
 
+    // No notch, só os cantos de baixo (o de cima é a borda da tela); solto, os quatro, e fechado vira pílula.
     private var forma: UnevenRoundedRectangle {
-        let raio: CGFloat = expandido ? 24 : 12
-        return UnevenRoundedRectangle(bottomLeadingRadius: raio, bottomTrailingRadius: raio, style: .continuous)
+        let raio: CGFloat = expandido ? 24 : livre ? geo.altura / 2 : 12
+        let topo = livre ? raio : 0
+        return UnevenRoundedRectangle(topLeadingRadius: topo, bottomLeadingRadius: raio, bottomTrailingRadius: raio,
+                                      topTrailingRadius: topo, style: .continuous)
+    }
+
+    private var arrasto: some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .global)
+            .onChanged { arrastar($0.location) }
+            .onEnded { _ in arrastar(nil) }
     }
 
     var body: some View {
@@ -138,11 +217,14 @@ struct NotchView: View {
                 fechado.transition(.opacity)
             }
         }
-        .frame(width: expandido ? max(larguraAberta, geometria.largura + 2 * orelha) : geometria.largura + 2 * orelha, alignment: .top)
-        .frame(minHeight: geometria.altura, alignment: .top)
+        .frame(width: expandido ? max(larguraAberta, geo.largura + 2 * orelha) : geo.largura + 2 * orelha, alignment: .top)
+        .frame(minHeight: geo.altura, alignment: .top)
         .background(.black)
         .clipShape(forma)
+        // Solto pode cair em fundo preto: um contorno leve mostra onde ele está.
+        .overlay { if livre { forma.stroke(.white.opacity(0.14), lineWidth: 1) } }
         .contentShape(forma)
+        .gesture(arrasto, including: livre ? .all : .subviews)
         .onTapGesture {
             if !expandido { withAnimation(animacao) { expandido = true } }
         }
@@ -174,9 +256,10 @@ struct NotchView: View {
                 }
             }
         }
-        .task {
+        .task(id: Ajustes.atual.ritmo) {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(4))
+                try? await Task.sleep(for: .seconds(Ajustes.atual.ritmo))
+                guard !Task.isCancelled else { return }
                 withAnimation(animacao) { indice &+= 1 }
             }
         }
@@ -184,8 +267,10 @@ struct NotchView: View {
 
     // MARK: Fechado: um ativo de cada vez, nas "orelhas" ao lado do notch
 
+    // Só o que está no letreiro (página Widget do painel) e já tem cotação.
     private var destaque: Linha? {
-        let lista = (carteira.linhas + carteira.linhasBinance).filter { $0.cotacao != nil }
+        let fora = Ajustes.atual.foraDoLetreiro
+        let lista = (carteira.linhas + carteira.linhasBinance).filter { $0.cotacao != nil && !fora.contains($0.id) }
         return lista.isEmpty ? nil : lista[indice % lista.count]
     }
 
@@ -193,43 +278,49 @@ struct NotchView: View {
         reduzirMovimento ? .opacity : .push(from: .bottom)
     }
 
+    // Estilo da página Widget: o ativo da vez com variação, cotação ou as duas; ou o total da carteira, parado.
     private var fechado: some View {
-        let atual = destaque
+        let estilo = Ajustes.atual.estilo
+        let total = estilo == .total ? carteira.total : nil
+        let atual = estilo == .total ? nil : destaque
         return HStack(spacing: 0) {
             ZStack(alignment: .leading) {
-                if let atual {
+                if let total {
+                    Text(valor: dinheiro(total.patrimonio, total.moeda))
+                        .contentTransition(.numericText())
+                } else if let atual {
                     Text(atual.ativo.simbolo)
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
                         .id(atual.id)
                         .transition(troca)
                 } else {
                     Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
             }
             .frame(width: orelha - 14, alignment: .leading)
 
-            Spacer(minLength: geometria.largura)
+            Spacer(minLength: geo.largura)
 
             ZStack(alignment: .trailing) {
-                if let atual, let c = atual.cotacao {
-                    HStack(spacing: 3) {
-                        Seta(valor: c.variacao)
-                        Text(pct(abs(c.variacao), sinal: false))
+                if let total {
+                    variacao(total.hojePct)
+                } else if let atual, let c = atual.cotacao {
+                    HStack(spacing: 6) {
+                        if estilo != .variacao { Text(dinheiro(c.preco, c.moeda, oculto: false)) }
+                        if estilo != .preco { variacao(c.variacao) }
                     }
-                    .font(.system(size: 12, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(cor(c.variacao))
                     .id(atual.id)
                     .transition(troca)
                 }
             }
             .frame(width: orelha - 14, alignment: .trailing)
         }
+        .font(.system(size: 12, weight: .semibold))
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
         .padding(.horizontal, 14)
-        .frame(height: geometria.altura)
+        .frame(height: geo.altura)
         .foregroundStyle(.white)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(atualAcessivel)
@@ -239,9 +330,23 @@ struct NotchView: View {
         .accessibilityAction(named: tr("Abrir painel", "Open StockNotch"), abrirPainel)
     }
 
+    private func variacao(_ fracao: Double) -> some View {
+        HStack(spacing: 3) {
+            Seta(valor: fracao)
+            Text(pct(abs(fracao), sinal: false))
+        }
+        .foregroundStyle(cor(fracao))
+    }
+
     private var atualAcessivel: String {
+        if Ajustes.atual.estilo == .total {
+            guard let total = carteira.total else { return "StockNotch" }
+            let valor = falado(dinheiro(total.patrimonio, total.moeda))
+            return tr("Carteira, \(valor), \(pct(total.hojePct)) hoje", "Portfolio, \(valor), \(pct(total.hojePct)) today")
+        }
         guard let atual = destaque, let c = atual.cotacao else { return "StockNotch" }
-        return tr("\(atual.ativo.simbolo), \(pct(c.variacao)) hoje", "\(atual.ativo.simbolo), \(pct(c.variacao)) today")
+        let preco = Ajustes.atual.estilo == .variacao ? "" : dinheiro(c.preco, c.moeda, oculto: false) + ", "
+        return tr("\(atual.ativo.simbolo), \(preco)\(pct(c.variacao)) hoje", "\(atual.ativo.simbolo), \(preco)\(pct(c.variacao)) today")
     }
 
     // MARK: Aberto: patrimônio e lista
@@ -252,7 +357,7 @@ struct NotchView: View {
                 Text("StockNotch")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
-                Spacer(minLength: geometria.largura + 16)
+                Spacer(minLength: geo.largura + 16)
                 Button(action: abrirPainel) {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 13, weight: .medium))
@@ -264,7 +369,7 @@ struct NotchView: View {
                 .help(tr("Abrir painel", "Open StockNotch"))
                 .accessibilityLabel(tr("Abrir painel", "Open StockNotch"))
             }
-            .frame(height: geometria.altura)
+            .frame(height: geo.altura)
 
             if carteira.linhas.isEmpty && carteira.linhasBinance.isEmpty {
                 vazio

@@ -14,6 +14,18 @@ enum Moeda: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+// Onde o widget fica: grudado no notch (topo da tela, ao centro) ou solto, onde a pessoa arrastar.
+enum PosicaoWidget: String, CaseIterable, Identifiable {
+    case notch, livre
+    var id: Self { self }
+}
+
+// O que o widget fechado mostra: um ativo de cada vez (variação, cotação ou as duas) ou o total, sem girar.
+enum EstiloWidget: String, CaseIterable, Identifiable {
+    case variacao, preco, completo, total
+    var id: Self { self }
+}
+
 // Preferências do usuário, guardadas no UserDefaults. Uma instância só (atual), no MainActor como as views:
 // os formatadores leem daqui e o Observation redesenha o notch e o painel abertos quando algo muda.
 @MainActor @Observable
@@ -37,6 +49,29 @@ final class Ajustes {
         didSet { defaults.set(privacidade, forKey: "privacidade") }
     }
 
+    var posicao: PosicaoWidget {
+        didSet { defaults.set(posicao.rawValue, forKey: "posicao") }
+    }
+
+    var estilo: EstiloWidget {
+        didSet { defaults.set(estilo.rawValue, forKey: "estilo") }
+    }
+
+    // Segundos de cada ativo no letreiro do widget fechado.
+    var ritmo: Int {
+        didSet { defaults.set(ritmo, forKey: "ritmo") }
+    }
+
+    // Linha.id do que não gira no letreiro. Guarda a exclusão, não a escolha: ativo novo entra girando.
+    var foraDoLetreiro: Set<String> {
+        didSet { defaults.set(foraDoLetreiro.sorted(), forKey: "foraDoLetreiro") }
+    }
+
+    // Topo e centro do widget solto, em coordenadas de tela; nil é o topo da tela principal.
+    var ancoraLivre: CGPoint? {
+        didSet { defaults.set(ancoraLivre.map { [$0.x, $0.y] }, forKey: "ancoraLivre") }
+    }
+
     @ObservationIgnored private let defaults: UserDefaults
 
     // Sem escolha salva, segue a primeira língua do sistema.
@@ -47,6 +82,11 @@ final class Ajustes {
         self.idioma = idioma
         moeda = defaults.string(forKey: "moeda").flatMap(Moeda.init) ?? (idioma == .pt ? .BRL : .USD)
         privacidade = defaults.bool(forKey: "privacidade")
+        posicao = defaults.string(forKey: "posicao").flatMap(PosicaoWidget.init) ?? .notch
+        estilo = defaults.string(forKey: "estilo").flatMap(EstiloWidget.init) ?? .variacao
+        ritmo = defaults.object(forKey: "ritmo") as? Int ?? 4
+        foraDoLetreiro = Set(defaults.stringArray(forKey: "foraDoLetreiro") ?? [])
+        ancoraLivre = (defaults.array(forKey: "ancoraLivre") as? [Double]).flatMap { $0.count == 2 ? CGPoint(x: $0[0], y: $0[1]) : nil }
     }
 }
 
