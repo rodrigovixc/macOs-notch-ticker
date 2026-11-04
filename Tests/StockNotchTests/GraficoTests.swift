@@ -39,6 +39,13 @@ private let btc = Cotacao(preco: 77_840, variacao: 77_840 / 76_816.01 - 1, moeda
     // Resposta só com o meta (a da cotação, sem barras) não tem desenho; sem resultado é erro.
     #expect(try yahoo(#"{"chart":{"result":[{"meta":{"currency":"USD","regularMarketPrice":1,"chartPreviousClose":1}}]}}"#).serie().pontos.isEmpty)
     #expect(throws: (any Error).self) { try yahoo(#"{"chart":{"result":null}}"#).serie() }
+
+    // Abertura da B3 antes do primeiro negócio (04/11/2026 às 10:18): o dia virou, as barras vêm vazias, sem "close".
+    // A cotação tem que sair mesmo assim, com o fechamento de ontem e variação zero, e o mercado conta como fechado.
+    let abertura = try yahoo(#"{"chart":{"result":[{"meta":{"currency":"BRL","exchangeName":"SAO","regularMarketTime":1793739945,"regularMarketPrice":50.71,"chartPreviousClose":50.71,"previousClose":50.71,"currentTradingPeriod":{"regular":{"start":1793797200,"end":1793822400}}},"indicators":{"quote":[{}]}}]}}"#)
+    let c = try abertura.cotacao(recebida: t(1793798325))
+    #expect(c.preco == 50.71 && c.variacao == 0 && c.selo(agora: t(1793798325)) == .fechado)
+    #expect(try abertura.serie().pontos.isEmpty)
 }
 
 @Test func serieDaBinance() throws {

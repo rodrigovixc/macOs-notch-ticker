@@ -128,7 +128,8 @@ struct RespostaYahoo: Decodable {
         let indicators: Indicadores?
     }
     struct Indicadores: Decodable { let quote: [Barras] }
-    struct Barras: Decodable { let close: [Double?] }  // null na barra sem negócio
+    // null na barra sem negócio; sem a chave na abertura, antes do primeiro negócio ("quote": [{}]).
+    struct Barras: Decodable { let close: [Double?]? }
     struct Meta: Decodable {
         let regularMarketPrice: Double
         let previousClose: Double?
