@@ -5,11 +5,12 @@ import UserNotifications
 
 struct PainelView: View {
     enum Secao: CaseIterable, Identifiable {
-        case carteira, binance, widget, ajustes
+        case visao, carteira, binance, widget, ajustes
         var id: Self { self }
 
         var icone: String {
             switch self {
+            case .visao: "chart.pie"
             case .carteira: "briefcase"
             case .binance: "link"
             case .widget: "menubar.rectangle"
@@ -19,6 +20,7 @@ struct PainelView: View {
 
         @MainActor var nome: String {
             switch self {
+            case .visao: tr("Visão geral", "Overview")
             case .carteira: tr("Carteira", "Portfolio")
             case .binance: "Binance"
             case .widget: "Widget"
@@ -27,7 +29,7 @@ struct PainelView: View {
         }
     }
 
-    @State private var secao: Secao? = .carteira
+    @State private var secao: Secao? = .visao
 
     var body: some View {
         NavigationSplitView {
@@ -45,7 +47,8 @@ struct PainelView: View {
                 .padding(12)
             }
         } detail: {
-            switch secao ?? .carteira {
+            switch secao ?? .visao {
+            case .visao: VisaoGeralTela()
             case .carteira: CarteiraTela()
             case .binance: BinanceTela()
             case .widget: WidgetTela()

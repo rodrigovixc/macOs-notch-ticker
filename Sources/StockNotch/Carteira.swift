@@ -185,6 +185,11 @@ final class Carteira {
     private var credencial: Credencial?
     private(set) var erroChave: Falha?  // chave salva que o macOS não deixou ler; ver lerChave()
     private(set) var indicadores: [String: Indicadores] = [:]  // por ativo, para o detalhe do notch
+    // Fechamentos diários de um ano, para o gráfico do patrimônio na Visão geral (ver carregarHistorico).
+    private(set) var historico: [String: Serie] = [:]
+    private(set) var historicoCambio: [String: [Ponto]] = [:]
+    private(set) var semHistorico: [String] = []
+    @ObservationIgnored private var historicoEm: (Date, Set<String>)?
     @ObservationIgnored private var indicadoresEm: [String: Date] = [:]
     @ObservationIgnored private var crumb: String?
     @ObservationIgnored private var fontes = Fontes()
@@ -298,6 +303,29 @@ final class Carteira {
         salvar()
     }
 
+    // O que tem ou teve posição: o que conta no patrimônio de algum dia do último ano.
+    var posicoesDoHistorico: [Linha] { linhas.filter { !$0.desejo } + linhasBinance }
+
+    // Ao abrir a Visão geral, e de novo a cada hora ou quando a carteira muda: um pedido por ativo e dois de câmbio.
+    // Os fechamentos de dias passados não mudam; o de hoje o gráfico troca pelo patrimônio de agora.
+    func carregarHistorico() async {
+        let ids = Set(posicoesDoHistorico.map(\.ativo.id))
+        if let (em, antes) = historicoEm, antes == ids, Date.now.timeIntervalSince(em) < 3600 { return }
+        historicoEm = (.now, ids)
+        let ativos = Dictionary(posicoesDoHistorico.map { ($0.ativo.id, $0.ativo) }, uniquingKeysWith: { a, _ in a })
+        var series: [String: Serie] = [:]
+        await withTaskGroup(of: (String, Serie?).self) { grupo in
+            for (id, ativo) in ativos { grupo.addTask { (id, try? await Fonte.historico(ativo)) } }
+            for await (id, serie) in grupo { series[id] = serie }
+        }
+        async let usd = try? Fonte.chart("USDBRL=X", "range=1y&interval=1d").serie()
+        async let eur = try? Fonte.chart("EURBRL=X", "range=1y&interval=1d").serie()
+        historicoCambio = ["USD": await usd?.pontos, "EUR": await eur?.pontos].compactMapValues { $0 }
+        historico = series.compactMapValues { $0 }
+        semHistorico = ativos.filter { series[$0.key] == nil }.map(\.value.simbolo).sorted()
+        if !semHistorico.isEmpty { historicoEm = nil }  // tenta de novo na próxima vez que a tela abrir
+    }
+
     // Ao parar o mouse numa ação no notch. No máximo a cada 5 min por ativo: os fundamentos mudam devagar, e o
     // preço do dia vem da cotação normal. Na falha, esquece o crumb (pode ter vencido) e tenta de novo no próximo.
     func carregarIndicadores(_ ativo: Ativo) async {
@@ -371,6 +399,8 @@ final class Carteira {
     // Logo no login o Keychain pode estar trancado: atualizar() tenta de novo sozinho nesse caso. Recusada ou fechada a
     // janela de permissão, só pelo botão Tentar de novo, senão a janela voltaria a cada 10 s.
     func lerChave() {
+        // Para testar o app sem a janela do Keychain (cada build novo seria outro app para ele): sem Binance.
+        guard ProcessInfo.processInfo.environment["STOCKNOTCH_SEM_CHAVEIRO"] == nil else { return }
         do {
             credencial = try Chaveiro.ler()
             erroChave = nil
