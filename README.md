@@ -62,7 +62,7 @@ cd macOs-notch-ticker
 open StockNotch.app
 ```
 
-`build.sh` compiles a release build, wraps it in an app bundle and signs it locally (ad-hoc). Drag the app to `/Applications` and turn on **Open at login** in **Settings** to start it with your Mac. If macOS asks for approval, the app says so and has a button that opens **System Settings → General → Login Items**.
+`build.sh` compiles a release build, wraps it in an app bundle and signs it. Run `scripts/criar-certificado-local.sh` once per Mac to create a local signing certificate ("StockNotch Local", used only to sign code): with it, every build has the same signing identity, so the Keychain keeps your "Always Allow" for the Binance key across updates. Without it the build is signed ad-hoc, and each new build asks for the Keychain password again. Drag the app to `/Applications` and turn on **Open at login** in **Settings** to start it with your Mac. If macOS asks for approval, the app says so and has a button that opens **System Settings → General → Login Items**.
 
 Open at login and notifications need the app bundle: when run with `swift run`, the switch is disabled and alerts don't notify.
 
