@@ -375,3 +375,22 @@ private func posicao(_ ativo: Ativo) -> Posicao { Posicao(ativo.lancamentos(cale
     // Uma permissão que a Binance criar depois também recusa.
     #expect(try !ler(#"{"enableReading":true,"enableAlgoNovo":true}"#).soLeitura)
 }
+
+// Letreiro com vários de uma vez: páginas seguidas, dando a volta; com poucos ativos, todos parados.
+@Test func paginasDoLetreiro() {
+    let l = ["A", "B", "C", "D", "E"]
+    #expect(pagina(l, quantos: 3, indice: 0) == ["A", "B", "C"])
+    #expect(pagina(l, quantos: 3, indice: 1) == ["D", "E", "A"])
+    #expect(pagina(l, quantos: 1, indice: 7) == ["C"])
+    #expect(pagina(["A", "B", "C"], quantos: 3, indice: 5) == ["A", "B", "C"])
+    #expect(pagina([String](), quantos: 2, indice: 3).isEmpty)
+}
+
+// Metade ações, metade cripto: o ímpar fica com as ações, e o lado que não enche cede as vagas.
+@Test func letreiroDividido() {
+    let acoes = ["PETR4", "VALE3", "AAPL"], cripto = ["BTC", "ETH", "SOL"]
+    #expect(paginaDividida(acoes, cripto, quantos: 3, indice: 0) == (["PETR4", "VALE3"], ["BTC"]))
+    #expect(paginaDividida(acoes, cripto, quantos: 3, indice: 1) == (["AAPL", "PETR4"], ["ETH"]))
+    #expect(paginaDividida(["PETR4"], cripto, quantos: 3, indice: 0) == (["PETR4"], ["BTC", "ETH"]))
+    #expect(paginaDividida(acoes, ["BTC"], quantos: 4, indice: 0) == (["PETR4", "VALE3", "AAPL"], ["BTC"]))
+}
