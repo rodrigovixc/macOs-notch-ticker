@@ -19,6 +19,7 @@ Built with SwiftUI and AppKit, no third-party dependencies. The interface is in 
 ## Features
 
 - **Notch widget**: a black panel that blends with the notch, cycles through your assets (`PETR4 ▲ 1.20%`) and expands on hover into a full portfolio view. On displays without a notch it becomes a small pill centered on the menu bar.
+- **Your layout**: on the **Widget** page, keep it in the notch or let it float anywhere you drag it, choose what it shows collapsed (change, price, both, or the portfolio total), how fast it switches and which assets rotate.
 - **Stocks and crypto**: Brazilian (B3) and US stocks via Yahoo Finance, refreshed every 10 seconds (US stocks in real time; B3 15 minutes delayed, like Google Finance); crypto streamed live from the Binance public WebSocket, with the REST API as a fallback. Daily change uses the same definition as Google Finance in each market.
 - **Intraday sparkline**: a small chart of the day next to each price, in the expanded notch and in the management table. Green or red with the day's change, with a subtle dashed line at the previous close, and it always ends at the price shown beside it.
 - **Data age at a glance**: each price carries a badge: *live*, the source delay (*15 min* for B3), *closed*, the quote's time when the source can't confirm it's current, or a warning with the time of the last update when a price hasn't refreshed for over 2 minutes.
@@ -64,6 +65,14 @@ open StockNotch.app
 Open at login and notifications need the app bundle: when run with `swift run`, the switch is disabled and alerts don't notify.
 
 To work on the code, open `Package.swift` in Xcode.
+
+## Customizing the widget
+
+The **Widget** page in the management window applies changes right away:
+
+- **Position**: *in the notch* (top center, blending with the notch or as a pill on displays without one) or *floating*: a pill you drag anywhere, on any display. It remembers where you left it, stays on screen when it expands near an edge, and **Move Back to the Top of the Screen** resets it.
+- **Collapsed**: the asset and its daily change (`PETR4 ▲ 1.20%`), the asset and its price, the asset with price and change, or the portfolio total and today's change without rotating. Wider choices make the collapsed widget wider.
+- **Ticker**: switch every 2, 4, 6 or 10 seconds, and pick which assets rotate. The choice is stored as the assets you turned off, so a new asset rotates until you turn it off.
 
 ## Importing transactions
 
@@ -125,7 +134,7 @@ The app checks the key's permissions and refuses any key that can trade, transfe
 ## Where data is stored
 
 - Portfolio: `~/Library/Application Support/StockNotch/carteira.json` (readable JSON, easy to back up): your assets with their purchases, sales and price alerts, plus the Binance average prices. Files from earlier versions (a plain list of assets, or assets without alerts) are still read and are saved in the new format on the next change. If the file exists but can't be read (invalid JSON, no `ativos` list, no permission, a folder or broken link in its place) or can't be saved, the app never writes over it: the Portfolio window says why, offers **Show in Finder**, and disables adding until it's fixed.
-- Settings (language, currency, privacy mode): the app's macOS user defaults. Open at login is kept by macOS itself.
+- Settings (language, currency, privacy mode, widget position, style and ticker): the app's macOS user defaults. Open at login is kept by macOS itself.
 - Binance secret: macOS Keychain, service `io.github.rodrigovixc.stocknotch.binance`
 
 ## Tests
@@ -143,8 +152,8 @@ The tests cover the intraday chart (Yahoo 5-minute bars and Binance klines from 
 ```
 Sources/StockNotch/
 ├── App.swift       # app entry point, formatting helpers, shared UI pieces
-├── Ajustes.swift   # language, currency and privacy settings, tr() translation helper
-├── Notch.swift     # notch panel, hover tracking, collapsed/expanded views
+├── Ajustes.swift   # language, currency, privacy and widget settings, tr() translation helper
+├── Notch.swift     # notch or floating panel, hover tracking, dragging, collapsed/expanded views
 ├── Painel.swift    # management window: assets table, transactions, alerts, Binance, settings
 ├── Carteira.swift  # portfolio model, persistence, totals, refresh cycle
 ├── Cotacoes.swift  # quotes and their age, snapshot, Yahoo and Binance REST
