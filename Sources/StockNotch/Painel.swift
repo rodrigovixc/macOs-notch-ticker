@@ -1073,13 +1073,16 @@ struct WidgetTela: View {
                     Text(tr("Solto, onde você arrastar", "Floating, wherever you drag it")).tag(PosicaoWidget.livre)
                 }
                 .pickerStyle(.radioGroup)
+                if #available(macOS 26.0, *) {
+                    Toggle(tr("Vidro (Liquid Glass)", "Glass (Liquid Glass)"), isOn: $ajustes.vidro)
+                }
                 if ajustes.posicao == .livre {
                     Button(tr("Voltar para o topo da tela", "Move Back to the Top of the Screen")) { ajustes.ancoraLivre = nil }
                         .disabled(ajustes.ancoraLivre == nil)
                 }
             } footer: {
-                nota(tr("Solto, arraste o widget com o mouse para qualquer lugar, em qualquer tela. Ele lembra onde ficou.",
-                        "When floating, drag the widget anywhere, on any display. It remembers where you left it."))
+                nota(tr("Solto, arraste o widget com o mouse para qualquer lugar, em qualquer tela. Ele lembra onde ficou. O vidro vale solto e em telas sem notch; no notch de verdade o widget fica preto, para se fundir com ele.",
+                        "When floating, drag the widget anywhere, on any display. It remembers where you left it. Glass applies when floating and on displays without a notch; in a real notch the widget stays black to blend in."))
             }
             Section {
                 Picker(tr("Mostrar", "Show"), selection: $ajustes.estilo) {

@@ -267,10 +267,7 @@ struct NotchView: View {
         }
         .frame(width: expandido ? max(larguraAberta, larguraFechada) : larguraFechada, alignment: .top)
         .frame(minHeight: geo.altura, alignment: .top)
-        .background(.black)
-        .clipShape(forma)
-        // Solto pode cair em fundo preto: um contorno leve mostra onde ele está.
-        .overlay { if livre { forma.stroke(.white.opacity(0.14), lineWidth: 1) } }
+        .modifier(FundoWidget(forma: forma, vidro: Ajustes.atual.vidro && semVao, contorno: livre))
         .contentShape(forma)
         .gesture(arrasto, including: livre ? .all : .subviews)
         .onTapGesture {
@@ -598,6 +595,28 @@ struct NotchView: View {
         }
         .font(.system(size: 10.5))
         .foregroundStyle(.secondary)
+    }
+}
+
+// Preto no notch de verdade, que some junto com ele. Solto ou em tela sem notch, o vidro do macOS 26 em diante
+// (Liquid Glass), escurecido para o texto branco continuar legível sobre qualquer fundo. Antes do 26, preto; solto, com
+// um contorno leve, que mostra onde ele está sobre um fundo escuro.
+private struct FundoWidget<Forma: Shape>: ViewModifier {
+    let forma: Forma
+    let vidro: Bool
+    let contorno: Bool
+
+    func body(content: Content) -> some View {
+        if vidro, #available(macOS 26.0, *) {
+            content
+                .clipShape(forma)
+                .glassEffect(.regular.tint(.black.opacity(0.45)), in: forma)
+        } else {
+            content
+                .background(.black)
+                .clipShape(forma)
+                .overlay { if contorno { forma.stroke(.white.opacity(0.14), lineWidth: 1) } }
+        }
     }
 }
 

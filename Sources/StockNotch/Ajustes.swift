@@ -53,6 +53,11 @@ final class Ajustes {
         didSet { defaults.set(posicao.rawValue, forKey: "posicao") }
     }
 
+    // Widget de vidro (Liquid Glass, macOS 26 em diante) quando não está colado a um notch de verdade.
+    var vidro: Bool {
+        didSet { defaults.set(vidro, forKey: "vidro") }
+    }
+
     var estilo: EstiloWidget {
         didSet { defaults.set(estilo.rawValue, forKey: "estilo") }
     }
@@ -94,6 +99,7 @@ final class Ajustes {
         privacidade = defaults.bool(forKey: "privacidade")
         posicao = defaults.string(forKey: "posicao").flatMap(PosicaoWidget.init) ?? .notch
         estilo = defaults.string(forKey: "estilo").flatMap(EstiloWidget.init) ?? .variacao
+        vidro = defaults.object(forKey: "vidro") as? Bool ?? true
         ritmo = defaults.object(forKey: "ritmo") as? Int ?? 4
         quantos = defaults.object(forKey: "quantos") as? Int ?? 1
         dividir = defaults.bool(forKey: "dividir")
