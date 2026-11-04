@@ -30,7 +30,7 @@ Built with SwiftUI and AppKit, no third-party dependencies. The interface is in 
 - **Price alerts**: per asset, notify when the price is above or below a value (in the asset's own currency) or when the daily change reaches ±X%. Native macOS notifications, once per crossing.
 - **Privacy mode**: hides amounts and quantities (`R$ ••••`) in the notch and the management window, so you can share your screen; prices and percentages stay visible. Toggle it in **Settings** or from the notch's right-click menu.
 - **Open at login**: one switch in **Settings**, using the macOS login items service.
-- **Management window**: a native table with your assets, transaction history (purchases and sales), price alerts and the Binance connection.
+- **Management window**: a translucent glass window with a native table of your assets (owned, Binance balances and wishlist, tagged), transaction history (purchases and sales), price alerts and the Binance connection.
 - **Search and wishlist**: add an asset by searching its name or symbol ("petro" finds PETR4, "bitcoin" finds BTC; B3 first in Portuguese or with the Mac set to Brazil), either as owned, with a purchase, or on your wishlist to just follow it. Tags tell stocks from crypto and owned from wishlist in the table, and the notch lists the wishlist in its own section.
 - **CSV import**: paste or open a list of purchases and sales, check each line in a preview, then import them all at once.
 - **Accessibility**: changes are shown with arrows and signs, not just color, and animations respect *Reduce Motion*.
