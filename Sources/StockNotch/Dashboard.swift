@@ -40,6 +40,7 @@ extension Classe {
 struct FaixaAlocacao: View {
     let classes: [(classe: Classe, valor: Double, parte: Double)]
     var altura: CGFloat = 8
+    var legenda = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -53,7 +54,7 @@ struct FaixaAlocacao: View {
                 }
             }
             .frame(height: altura)
-            HStack(spacing: 12) {
+            if legenda { HStack(spacing: 12) {
                 ForEach(classes, id: \.classe) { c in
                     HStack(spacing: 4) {
                         Circle().fill(c.classe.cor).frame(width: 7, height: 7)
@@ -63,7 +64,7 @@ struct FaixaAlocacao: View {
                     .accessibilityElement(children: .combine)
                 }
             }
-            .monospacedDigit()
+            .monospacedDigit() }
         }
     }
 }
@@ -139,16 +140,17 @@ struct VisaoGeralTela: View {
                 Label(aviso, systemImage: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
             }
             cartao(tr("Patrimônio", "Portfolio value")) { patrimonio }
+            // Cada par de cartões com a mesma altura: o mais baixo estica até o mais alto.
             HStack(alignment: .top, spacing: estilo.espaco) {
-                cartao(tr("Alocação por classe", "Allocation by class")) {
-                    FaixaAlocacao(classes: porClasse(carteira.fatias), altura: compacto ? 8 : 14)
-                }
+                cartao(tr("Alocação por classe", "Allocation by class")) { porClasseDetalhado }
                 cartao(tr("Alocação por ativo", "Allocation by asset")) { alocacao }
             }
+            .fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .top, spacing: estilo.espaco) {
                 cartao(tr("Hoje", "Today")) { hoje }
                 cartao(tr("Resultado em aberto", "Unrealized gain")) { resultados }
             }
+            .fixedSize(horizontal: false, vertical: true)
             if !desejos.isEmpty { cartao(tr("Lista de desejos", "Wishlist")) { listaDeDesejos } }
         }
         .padding(compacto ? 12 : 20)
@@ -178,7 +180,7 @@ struct VisaoGeralTela: View {
             secao(tr("Patrimônio no tempo", "Value over time")) { patrimonio }
             Divider()
             HStack(alignment: .top, spacing: 40) {
-                secao(tr("Alocação por classe", "Allocation by class")) { FaixaAlocacao(classes: porClasse(carteira.fatias), altura: 10) }
+                secao(tr("Alocação por classe", "Allocation by class")) { porClasseDetalhado }
                 secao(tr("Alocação por ativo", "Allocation by asset")) { alocacao }
             }
             Divider()
@@ -213,7 +215,8 @@ struct VisaoGeralTela: View {
     // MARK: Números
 
     private func numeros(_ t: Total) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: compacto ? 140 : 170), spacing: estilo.espaco)], spacing: estilo.espaco) {
+        // Uma linha, partes iguais e a mesma altura: uma grade adaptável deixava coluna sobrando à direita.
+        HStack(alignment: .top, spacing: estilo.espaco) {
             numero(tr("Patrimônio", "Portfolio value"), dinheiro(t.patrimonio, t.moeda), destaque: true)
             numero(tr("Hoje", "Today"), dinheiro(t.hoje, t.moeda, sinal: true), detalhe: pct(t.hojePct), cor: cor(t.hoje))
             numero(tr("Em aberto", "Unrealized"), t.custo > 0 ? dinheiro(t.aberto.lucro, t.moeda, sinal: true) : "—",
@@ -221,6 +224,7 @@ struct VisaoGeralTela: View {
             numero(tr("Realizado", "Realized"), t.realizado != 0 ? dinheiro(t.realizado, t.moeda, sinal: true) : "—", cor: cor(t.realizado))
             numero(tr("Investido", "Invested"), t.custo > 0 ? dinheiro(t.custo, t.moeda) : "—")
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func numero(_ rotulo: String, _ valor: String, detalhe: String? = nil, cor: Color = .primary, destaque: Bool = false) -> some View {
@@ -235,7 +239,7 @@ struct VisaoGeralTela: View {
         }
         .monospacedDigit()
         .padding(compacto ? 10 : estilo.respiro - 2)
-        .frame(maxWidth: .infinity, minHeight: compacto ? 58 : 78, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: compacto ? 58 : 78, maxHeight: .infinity, alignment: .topLeading)
         .modifier(FundoCartao())
         .accessibilityElement(children: .combine)
     }
@@ -373,6 +377,25 @@ struct VisaoGeralTela: View {
         pontos.min { abs($0.em.timeIntervalSince(instante)) < abs($1.em.timeIntervalSince(instante)) }
     }
 
+    private var porClasseDetalhado: some View {
+        let classes = porClasse(carteira.fatias)
+        let moeda = carteira.total?.moeda ?? carteira.moeda
+        return VStack(alignment: .leading, spacing: 10) {
+            FaixaAlocacao(classes: classes, altura: compacto ? 8 : 12, legenda: false)
+            ForEach(classes, id: \.classe) { c in
+                HStack(spacing: 8) {
+                    Circle().fill(c.classe.cor).frame(width: 8, height: 8)
+                    Text(c.classe.nome).font(.callout)
+                    Spacer()
+                    Text(valor: dinheiro(c.valor, moeda)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                    Text(c.parte.formatted(.percent.precision(.fractionLength(0)).locale(Ajustes.atual.idioma.locale)))
+                        .font(.callout.weight(.medium)).monospacedDigit().frame(width: 44, alignment: .trailing)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
     // MARK: Alocação, hoje e resultado: barras horizontais com o número escrito ao lado (rótulo direto).
 
     private var alocacao: some View {
@@ -486,7 +509,7 @@ struct VisaoGeralTela: View {
             conteudo()
         }
         .padding(estilo.respiro)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .modifier(FundoCartao())
     }
 
