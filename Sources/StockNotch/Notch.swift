@@ -99,6 +99,12 @@ final class NotchPanel: NSPanel {
         }
     }
 
+    // O CGEvent conta do topo da tela principal para baixo; o AppKit, de baixo para cima.
+    private static var pontoDoEvento: CGPoint? {
+        guard let evento = NSApp.currentEvent?.cgEvent, let altura = NSScreen.screens.first?.frame.height else { return nil }
+        return CGPoint(x: evento.location.x, y: altura - evento.location.y)
+    }
+
     // Topo e centro do widget: o notch, ou onde ele foi solto (de início, logo abaixo da barra de menus).
     private var ancora: CGPoint {
         if Ajustes.atual.posicao == .livre {
@@ -123,19 +129,19 @@ final class NotchPanel: NSPanel {
         invalidateShadow()
     }
 
-    // Solto, arrastar move o widget (fechado ou aberto). A conta é em coordenadas de tela: as da view andam junto
-    // com a janela. O ponto vem do gesto, na janela (topo à esquerda), e vira ponto de tela pelo quadro dela.
+    // Solto, arrastar move o widget (fechado ou aberto). A conta é na tela, pelo ponto do próprio evento: o do gesto
+    // anda junto com a janela e a faria correr na frente do mouse.
     private var arrasto: (mouse: CGPoint, ancora: CGPoint)?
 
-    private func arrastar(_ ponto: CGPoint?) {
+    private func arrastar(_ movendo: Bool) {
         guard Ajustes.atual.posicao == .livre else { return }
-        guard let ponto else {
+        guard movendo else {
             // Guarda onde ficou de fato: perto da borda, a janela foi empurrada para dentro.
             if arrasto != nil { Ajustes.atual.ancoraLivre = CGPoint(x: frame.midX, y: frame.maxY) }
             arrasto = nil
             return
         }
-        let mouse = CGPoint(x: frame.minX + ponto.x, y: frame.maxY - ponto.y)
+        let mouse = Self.pontoDoEvento ?? NSEvent.mouseLocation
         let inicio = arrasto ?? (mouse, ancora)
         arrasto = inicio
         Ajustes.atual.ancoraLivre = CGPoint(x: inicio.ancora.x + mouse.x - inicio.mouse.x, y: inicio.ancora.y + mouse.y - inicio.mouse.y)
@@ -170,7 +176,7 @@ struct NotchView: View {
     let abrirPainel: () -> Void
     let mouseNaJanela: () -> Bool
     let aoMudarTamanho: (CGSize) -> Void
-    let arrastar: (CGPoint?) -> Void  // ponto do mouse na janela; nil ao soltar
+    let arrastar: (Bool) -> Void  // true enquanto move, false ao soltar
 
     @State private var expandido = false
     @State private var indice = 0
@@ -204,9 +210,9 @@ struct NotchView: View {
     }
 
     private var arrasto: some Gesture {
-        DragGesture(minimumDistance: 3, coordinateSpace: .global)
-            .onChanged { arrastar($0.location) }
-            .onEnded { _ in arrastar(nil) }
+        DragGesture(minimumDistance: 3)
+            .onChanged { _ in arrastar(true) }
+            .onEnded { _ in arrastar(false) }
     }
 
     var body: some View {
