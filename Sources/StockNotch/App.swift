@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             let janela = NSWindow(contentViewController: host)
             janela.styleMask.insert(.fullSizeContentView)
             janela.toolbarStyle = .unified
-            janela.setContentSize(NSSize(width: 1080, height: 600))
+            janela.setContentSize(NSSize(width: 1240, height: 600))
             janela.isReleasedWhenClosed = false
             janela.delegate = self
             janela.center()

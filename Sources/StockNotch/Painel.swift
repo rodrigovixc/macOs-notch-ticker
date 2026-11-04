@@ -48,7 +48,7 @@ struct PainelView: View {
             case .ajustes: AjustesTela()
             }
         }
-        .frame(minWidth: 940, minHeight: 480)
+        .frame(minWidth: 1080, minHeight: 480)
         // Controles nativos (DatePicker etc.) seguem o idioma do app, não o do sistema.
         .environment(\.locale, Ajustes.atual.idioma.locale)
     }
@@ -168,11 +168,11 @@ struct CarteiraTela: View {
                 }
                 .padding(.vertical, 2)
             }
-            .width(min: 100, ideal: 120)
+            .width(min: 90, ideal: 110)
             TableColumn(tr("Quantidade", "Quantity")) { l in
                 Text(valor: l.quantidade > 0 ? qtd(l.quantidade) : "—")
             }
-            .width(min: 70, ideal: 80)
+            .width(min: 60, ideal: 80)
             .alignment(.trailing)
             // Preço médio na moeda das compras e cotação na do ativo; valor e resultado na moeda escolhida.
             TableColumn(tr("Preço médio", "Avg. Price")) { l in
@@ -192,7 +192,7 @@ struct CarteiraTela: View {
                     Text(carteira.faltaCambio(l) ? tr("sem câmbio", "no exchange rate") : "…").foregroundStyle(.secondary)
                 }
             }
-            .width(min: 90, ideal: 120)
+            .width(min: 90, ideal: 110)
             .alignment(.trailing)
             TableColumn(tr("Gráfico", "Chart")) { l in
                 if let c = l.cotacao { MiniGrafico(pontos: carteira.serie(l), cotacao: c) }
@@ -226,7 +226,7 @@ struct CarteiraTela: View {
                     Text("—").foregroundStyle(.secondary)
                 }
             }
-            .width(min: 90, ideal: 120)
+            .width(min: 90, ideal: 110)
             .alignment(.trailing)
             TableColumn(tr("Realizado", "Realized")) { l in
                 let r = carteira.resumo(l)
