@@ -40,6 +40,12 @@ for t in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
-# Assinatura local (ad-hoc): roda neste Mac; para outros Macs precisa da conta Apple Developer.
-codesign --force --sign - "$APP"
+# Assinatura: com o certificado "StockNotch Local" (scripts/criar-certificado-local.sh) o Keychain reconhece as
+# próximas versões e não pede a senha de novo para ler a chave da Binance. Sem ele, ad-hoc: roda neste Mac, mas cada
+# build pede a permissão outra vez. Para distribuir a outros Macs, só com a conta Apple Developer.
+if security find-certificate -c "StockNotch Local" >/dev/null 2>&1; then
+    codesign --force --sign "StockNotch Local" "$APP"
+else
+    codesign --force --sign - "$APP"
+fi
 echo "Pronto: $APP"
