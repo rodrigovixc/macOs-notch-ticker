@@ -18,6 +18,7 @@ Built with SwiftUI and AppKit, no third-party dependencies. The interface is in 
 
 ## Features
 
+- **Overview dashboard**: the first page of the management window. Portfolio value, today, unrealized, realized and invested at the top; a portfolio value chart for 1D, 1W, 1M, 6M or 1Y with the amount invested as a dashed line and a tooltip on hover; allocation by class and by asset; today's change and unrealized gain per asset as diverging bars; and wishlist cards with the distance to the 52-week high. The expanded notch also shows today's portfolio line next to the total and an allocation strip.
 - **Notch widget**: a black panel that blends with the notch, cycles through your assets (`PETR4 ▲ 1.20%`) and expands on hover into a full portfolio view. On displays without a notch it becomes a small pill centered on the menu bar.
 - **Your layout**: on the **Widget** page, keep it in the notch or let it float anywhere you drag it, choose what it shows collapsed (change, price, both, or the portfolio total), how fast it switches and which assets rotate.
 - **Stocks and crypto**: Brazilian (B3) and US stocks via Yahoo Finance, refreshed every 10 seconds (US stocks in real time; B3 15 minutes delayed, like Google Finance); crypto streamed live from the Binance public WebSocket, with the REST API as a fallback. Daily change uses the same definition as Google Finance in each market.
@@ -67,6 +68,13 @@ open StockNotch.app
 Open at login and notifications need the app bundle: when run with `swift run`, the switch is disabled and alerts don't notify.
 
 To work on the code, open `Package.swift` in Xcode.
+
+## Overview
+
+- **1D** adds up each position's intraday line (the same data as the sparklines) at the current exchange rate, ending at the total shown above it.
+- **1W to 1Y** use daily closes for one year (Yahoo for stocks and exchange rates, Binance daily candles for crypto), fetched when the page opens and again after an hour or when the portfolio changes. Each day counts what you held on that date, from your purchase and sale dates, converted at that day's exchange rate; the chart starts at your first purchase and ends at the current total. Binance balances are only known as of today, so they count as constant over the whole period. Assets whose history couldn't be fetched are named under the chart.
+- The invested line is the cost of what you held (average cost), plus Binance balances with an average price.
+- In privacy mode the chart's value axis is hidden and amounts are masked; percentages stay.
 
 ## Customizing the widget
 
@@ -165,6 +173,8 @@ Sources/StockNotch/
 ├── Importar.swift  # CSV import: parsing and line-by-line validation
 ├── Alertas.swift   # price alerts: crossing rule and native notifications
 ├── Indicadores.swift # stock indicators for the notch hover detail (Yahoo quote with crumb)
+├── Patrimonio.swift # portfolio value over time and allocation (pure math), daily history fetch
+├── Dashboard.swift  # Overview page: KPIs, value chart, allocation, movers, gains, wishlist
 ├── Grafico.swift   # intraday sparkline: series, fitting to the price shown, Swift Charts view
 └── Binance.swift   # signed read-only API calls and Keychain storage
 ```
