@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main, "feat/**"]
+
+permissions:
+  contents: read
+
+# Um push novo no mesmo ramo cancela a execução anterior (não há o que comparar).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    # macos-26 (arm64) traz as Xcode 26.x; o código usa Swift 6 e APIs do macOS 15.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # O compilador entra na chave: .build de outra versão do Swift quebra a compilação.
+      - name: Versão do Swift
+        id: swift
+        run: |
+          swift --version
+          echo "hash=$(swift --version 2>&1 | shasum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ steps.swift.outputs.hash }}-${{ hashFiles('Package.swift', 'Sources/**') }}
+          restore-keys: spm-${{ runner.os }}-${{ steps.swift.outputs.hash }}-
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test

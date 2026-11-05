@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct StockNotchApp: App {
@@ -11,22 +12,34 @@ struct StockNotchApp: App {
     }
 }
 
+// Ações e câmbio a cada 10 s: cerca de um pedido por símbolo a cada 10 s é o que o Yahoo aguenta sem 429.
+// Cripto chega pelo stream da Binance; o ciclo só a busca quando o stream não trouxe.
 let intervalo: Duration = .seconds(10)
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
     let carteira = Carteira()
     private var notch: NotchPanel?
     private var painel: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // sem ícone no Dock, como os apps de notch
+        if emPacote { UNUserNotificationCenter.current().delegate = self }
         notch = NotchPanel(carteira: carteira) { [weak self] in self?.abrirPainel() }
         if carteira.ativos.isEmpty && !carteira.binanceConectada { abrirPainel() }
+        // De início a início: o tempo da busca não se soma aos 10 s.
         Task {
             while true {
+                let inicio = ContinuousClock.now
                 await carteira.atualizar()
-                try? await Task.sleep(for: intervalo)
+                try? await Task.sleep(until: inicio + intervalo)
+            }
+        }
+        // Sem rede o ciclo leva até ~30 s; o "agora" dos selos não pode esperar por ele.
+        Task {
+            while true {
+                try? await Task.sleep(for: .seconds(2))
+                carteira.envelhecer()
             }
         }
     }
@@ -37,9 +50,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             host.sceneBridgingOptions = [.toolbars, .title]
             host.sizingOptions = [.minSize]  // a janela não encolhe abaixo do mínimo do SwiftUI
             let janela = NSWindow(contentViewController: host)
+            // ponytail: aberta no início do app com a carteira vazia, a ponte não traz o navigationTitle e a
+            // janela ficava "Untitled"; quando a ponte funciona, o título da seção substitui este.
+            janela.title = "StockNotch"
             janela.styleMask.insert(.fullSizeContentView)
+            // Transparente para o vidro do painel (FundoDeVidro) mostrar o que está atrás.
+            janela.isOpaque = false
+            janela.backgroundColor = .clear
             janela.toolbarStyle = .unified
-            janela.setContentSize(NSSize(width: 1000, height: 600))
+            janela.setContentSize(NSSize(width: 1240, height: 600))
             janela.isReleasedWhenClosed = false
             janela.delegate = self
             janela.center()
@@ -54,24 +73,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
     }
+
+    // Abrir o app de novo (Finder, Launchpad, Spotlight) com ele já rodando mostra o painel.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        abrirPainel()
+        return false
+    }
+
+    // Com o painel aberto o app está ativo, e o macOS esconderia o alerta de preço: mostra mesmo assim.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification)
+        async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
+    // Clicar no alerta abre o painel: o app vive no notch e não teria janela para mostrar.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        await abrirPainel()
+    }
 }
 
 // MARK: - Formatação e peças visuais usadas no notch e no painel
 
-func dinheiro(_ valor: Double, _ moeda: String, sinal: Bool = false) -> String {
+// Formatadores no idioma escolhido (pt_BR: R$ 1.234,50; en_US: R$1,234.50).
+// No modo privacidade os números somem e o símbolo e o sinal ficam (R$ ••••). Ocultar é o padrão, para nada
+// novo vazar: só a cotação de mercado, que não diz nada da carteira, passa oculto: false.
+@MainActor func dinheiro(_ valor: Double, _ moeda: String, sinal: Bool = false, oculto: Bool = Ajustes.atual.privacidade,
+                         idioma: Idioma = Ajustes.atual.idioma) -> String {
     // Cripto barata (ex.: R$ 0,000123) precisa de mais casas.
-    var estilo = FloatingPointFormatStyle<Double>.Currency(code: moeda)
+    var estilo = FloatingPointFormatStyle<Double>.Currency(code: moeda, locale: idioma.locale)
         .precision(.fractionLength(valor.magnitude < 1 && valor != 0 ? 2...6 : 2...2))
     if sinal { estilo = estilo.sign(strategy: .always()) }
-    return valor.formatted(estilo)
+    let texto = valor.formatted(estilo)
+    return oculto ? texto.replacing(#/\d[\d.,]*/#, with: "••••") : texto
 }
 
-func pct(_ fracao: Double) -> String {
-    fracao.formatted(.percent.precision(.fractionLength(2)).sign(strategy: .always()))
+// Para o VoiceOver: "R$ oculto" em vez de ler os pontos do modo privacidade um por um.
+@MainActor func falado(_ texto: String) -> String { texto.replacingOccurrences(of: "••••", with: tr("oculto", "hidden")) }
+
+extension Text {
+    // Valor ou quantidade da carteira (dinheiro, qtd): oculto no modo privacidade, dito "oculto" pelo VoiceOver.
+    @MainActor init(valor texto: String) {
+        self = Text(texto).accessibilityLabel(falado(texto))
+    }
 }
 
-func qtd(_ valor: Double) -> String {
-    valor.formatted(.number.precision(.fractionLength(0...8)))
+@MainActor func pct(_ fracao: Double, sinal: Bool = true, idioma: Idioma = Ajustes.atual.idioma) -> String {
+    var estilo = FloatingPointFormatStyle<Double>.Percent(locale: idioma.locale).precision(.fractionLength(2))
+    if sinal { estilo = estilo.sign(strategy: .always()) }
+    return fracao.formatted(estilo)
+}
+
+@MainActor func qtd(_ valor: Double, oculto: Bool = Ajustes.atual.privacidade, idioma: Idioma = Ajustes.atual.idioma) -> String {
+    oculto ? "••••" : valor.formatted(FloatingPointFormatStyle<Double>(locale: idioma.locale).precision(.fractionLength(0...8)))
+}
+
+@MainActor func quando(_ instante: Date, data: Date.FormatStyle.DateStyle = .omitted, hora: Date.FormatStyle.TimeStyle = .omitted,
+                       idioma: Idioma = Ajustes.atual.idioma) -> String {
+    instante.formatted(Date.FormatStyle(date: data, time: hora, locale: idioma.locale))
+}
+
+// Só a hora quando é de hoje; de outro dia vai com a data (a cotação de sexta vista no sábado).
+@MainActor func momento(_ instante: Date, agora: Date = .now, segundos: Bool = false) -> String {
+    let hora: Date.FormatStyle.TimeStyle = segundos ? .standard : .shortened
+    return Calendar.current.isDate(instante, inSameDayAs: agora) ? quando(instante, hora: hora) : quando(instante, data: .abbreviated, hora: hora)
 }
 
 func cor(_ valor: Double) -> Color {
@@ -117,7 +181,7 @@ struct Pilula: View {
     var body: some View {
         HStack(spacing: 3) {
             Seta(valor: fracao)
-            Text(abs(fracao).formatted(.percent.precision(.fractionLength(2))))
+            Text(pct(abs(fracao), sinal: false))
         }
         .font(.system(size: 11, weight: .semibold))
         .monospacedDigit()
@@ -126,17 +190,83 @@ struct Pilula: View {
         .padding(.vertical, 3)
         .background(cor(fracao).opacity(0.16), in: Capsule())
         .accessibilityElement()
-        .accessibilityLabel("Variação \(pct(fracao))")
+        .accessibilityLabel(tr("Variação \(pct(fracao))", "Change \(pct(fracao))"))
     }
 }
 
+// Idade da cotação em poucas letras ("ao vivo", "15 min", "fechado" ou o horário); parada, com o alerta.
+// O texto completo vai para o VoiceOver e para a dica.
+struct SeloCotacao: View {
+    let cotacao: Cotacao
+    let agora: Date
+
+    var body: some View {
+        let selo = cotacao.selo(agora: agora)
+        // Preço fixo (BRL, USDT) não tem idade: nada de selo, muito menos "ao vivo".
+        if selo != .fixo {
+            rotulo(selo)
+        }
+    }
+
+    private func rotulo(_ selo: Selo) -> some View {
+        HStack(spacing: 3) {
+            switch selo {
+            case .aoVivo:
+                Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.green)
+                Text(tr("ao vivo", "live"))
+            case .atraso(let atraso):
+                Image(systemName: "clock")
+                Text("\(Int(atraso / 60)) min")
+            case .fechado:
+                Text(tr("fechado", "closed"))
+            case .velho(let desde):
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(momento(desde, agora: agora))
+            case .horario(let em):
+                Text(momento(em, agora: agora))
+            case .fixo:
+                EmptyView()
+            }
+        }
+        .lineLimit(1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(descricao(selo))
+        .help(descricao(selo))
+    }
+
+    private func descricao(_ selo: Selo) -> String {
+        let hora = momento(cotacao.em, agora: agora, segundos: true)
+        switch selo {
+        case .aoVivo:
+            return tr("Ao vivo, cotação das \(hora)", "Live, quote from \(hora)")
+        case .atraso(let atraso):
+            return tr("Fonte com \(Int(atraso / 60)) min de atraso, cotação das \(hora)", "Source delayed \(Int(atraso / 60)) min, quote from \(hora)")
+        case .fechado:
+            return tr("Mercado fechado, última cotação das \(hora)", "Market closed, last quote from \(hora)")
+        case .velho(let desde):
+            return tr("Sem atualizar desde \(momento(desde, agora: agora)), cotação das \(hora)",
+                      "Not updated since \(momento(desde, agora: agora)), quote from \(hora)")
+        case .horario:
+            return tr("Cotação das \(hora)", "Quote from \(hora)")
+        case .fixo:
+            return tr("Preço fixo", "Fixed price")
+        }
+    }
+}
+
+// Sem percentual para o realizado: o app não guarda sobre que custo ele foi apurado.
 struct TextoResultado: View {
     let resultado: Resultado
     let moeda: String
+    var comPercentual = true
 
+    // Uma linha só: sem espaço (coluna estreita, número grande), encolhe um pouco em vez de virar "…".
     var body: some View {
-        Text("\(dinheiro(resultado.lucro, moeda, sinal: true)) (\(pct(resultado.percentual)))")
+        let valor = dinheiro(resultado.lucro, moeda, sinal: true)
+        Text(valor: comPercentual ? "\(valor) (\(pct(resultado.percentual)))" : valor)
             .foregroundStyle(cor(resultado.lucro))
             .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
     }
 }
