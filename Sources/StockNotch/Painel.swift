@@ -206,14 +206,16 @@ struct CarteiraTela: View {
             // Preço médio na moeda das compras e cotação na do ativo; valor e resultado na moeda escolhida.
             TableColumn(tr("Preço médio", "Avg. Price")) { l in
                 // Saldo da Binance sem preço médio informado não tem custo: "—", não R$ 0,00.
-                Text(valor: l.quantidade > 0 && l.custo != nil ? dinheiro((l.custo ?? 0) / l.quantidade, l.moedaCusto) : "—")
+                let medio = carteira.naMoedaDe(l, (l.custo ?? 0) / max(l.quantidade, 1e-12), de: l.moedaCusto)
+                Text(valor: l.quantidade > 0 && l.custo != nil ? dinheiro(medio.valor, medio.moeda) : "—")
             }
             .width(min: 85, ideal: 100)
             .alignment(.trailing)
             TableColumn(tr("Cotação", "Price")) { l in
                 if let c = l.cotacao {
+                    let preco = carteira.naMoedaDe(l, c.preco, de: c.moeda)
                     VStack(alignment: .trailing, spacing: 0) {
-                        Text(dinheiro(c.preco, c.moeda, oculto: false))
+                        Text(dinheiro(preco.valor, preco.moeda, oculto: false))
                         SeloCotacao(cotacao: c, agora: carteira.agora).font(.caption).foregroundStyle(.secondary)
                     }
                 } else if carteira.falhas.contains(l.ativo.id) {
@@ -235,7 +237,7 @@ struct CarteiraTela: View {
             .alignment(.trailing)
             // Valor, em aberto e realizado pela mesma conta do total do notch (resumo → somar).
             TableColumn(tr("Valor", "Value")) { l in
-                let r = carteira.resumo(l)
+                let r = carteira.resumoDoAtivo(l)
                 if l.cotacao != nil, l.quantidade > 0 {
                     Text(valor: dinheiro(r.patrimonio, r.moeda))
                 } else {
@@ -246,7 +248,7 @@ struct CarteiraTela: View {
             .alignment(.trailing)
             // Percentual embaixo, como o selo da cotação: lado a lado não cabe na largura padrão da janela.
             TableColumn(tr("Em aberto", "Unrealized")) { l in
-                let r = carteira.resumo(l)
+                let r = carteira.resumoDoAtivo(l)
                 if r.custo > 0 {
                     VStack(alignment: .trailing, spacing: 0) {
                         TextoResultado(resultado: r.aberto, moeda: r.moeda, comPercentual: false)
@@ -259,7 +261,7 @@ struct CarteiraTela: View {
             .width(min: 90, ideal: 110)
             .alignment(.trailing)
             TableColumn(tr("Realizado", "Realized")) { l in
-                let r = carteira.resumo(l)
+                let r = carteira.resumoDoAtivo(l)
                 if r.realizado != 0 {
                     TextoResultado(resultado: Resultado(lucro: r.realizado, percentual: 0), moeda: r.moeda, comPercentual: false)
                 } else {
@@ -277,6 +279,7 @@ struct CarteiraTela: View {
         .lineLimit(1)
         .minimumScaleFactor(0.85)
         .contextMenu(forSelectionType: Ativo.ID.self) { ids in
+            if let id = ids.first, let l = linhas.first(where: { $0.id == id }) { MenuMoeda(linha: l) }
             if let ativo = carteira.ativos.first(where: { $0.id == ids.first }) {
                 let semGravar = carteira.erroArquivo != nil
                 Button(tr("Ver operações…", "View Transactions…")) { vendoOperacoes = ativo }
@@ -657,7 +660,7 @@ struct BinanceTela: View {
                             Spacer()
                             Text(valor: qtd(l.quantidade)).foregroundStyle(.secondary)
                             if let c = l.cotacao {
-                                let r = carteira.resumo(l)
+                                let r = carteira.resumoDoAtivo(l)
                                 // Como no notch e na tabela da Carteira: a idade do dado e o desenho do dia junto do valor.
                                 VStack(alignment: .trailing, spacing: 1) {
                                     Text(valor: dinheiro(r.patrimonio, r.moeda))
@@ -676,6 +679,7 @@ struct BinanceTela: View {
                             }
                         }
                         .monospacedDigit()
+                        .contextMenu { MenuMoeda(linha: l) }
                     }
                 }
                 if carteira.linhasBinance.contains(where: { ($0.custo ?? 0) > 0 }) {
@@ -1335,5 +1339,25 @@ private struct SecaoAbrirComMac: View {
                 : Falha("Não consegui mudar a abertura com o Mac (erro \(codigo)).", "Couldn't change opening at login (error \(codigo)).")
         }
         ler()
+    }
+}
+
+// Em que moeda a linha do ativo aparece (preço, valor e resultado). Vale para o mesmo ativo em toda parte.
+struct MenuMoeda: View {
+    let linha: Linha
+
+    var body: some View {
+        let ajustes = Ajustes.atual
+        Picker(tr("Mostrar em", "Show in"), selection: Binding(
+            get: { ajustes.moedaDoAtivo[linha.ativo.id] ?? "" },
+            set: { ajustes.moedaDoAtivo[linha.ativo.id] = $0.isEmpty ? nil : $0 }
+        )) {
+            Text(tr("Moeda própria (\(linha.moeda))", "Own currency (\(linha.moeda))")).tag("")
+            Text(tr("Real (BRL)", "Brazilian real (BRL)")).tag("BRL")
+            Text(tr("Dólar (USD)", "US dollar (USD)")).tag("USD")
+            Text(tr("Euro (EUR)", "Euro (EUR)")).tag("EUR")
+        }
+        .pickerStyle(.menu)
+        Divider()
     }
 }

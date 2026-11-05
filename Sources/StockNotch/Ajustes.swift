@@ -86,6 +86,12 @@ final class Ajustes {
         didSet { defaults.set(foraDoLetreiro.sorted(), forKey: "foraDoLetreiro") }
     }
 
+    // Ativo.id → moeda em que a linha dele aparece (BRL, USD, EUR). Sem entrada, a própria do ativo. Os totais
+    // seguem a moeda acima: somar reais com dólares só dá certo numa moeda só.
+    var moedaDoAtivo: [String: String] {
+        didSet { defaults.set(moedaDoAtivo, forKey: "moedaDoAtivo") }
+    }
+
     // Topo e centro do widget solto, em coordenadas de tela; nil é o topo da tela principal.
     var ancoraLivre: CGPoint? {
         didSet { defaults.set(ancoraLivre.map { [$0.x, $0.y] }, forKey: "ancoraLivre") }
@@ -109,6 +115,7 @@ final class Ajustes {
         quantos = defaults.object(forKey: "quantos") as? Int ?? 1
         dividir = defaults.bool(forKey: "dividir")
         foraDoLetreiro = Set(defaults.stringArray(forKey: "foraDoLetreiro") ?? [])
+        moedaDoAtivo = defaults.dictionary(forKey: "moedaDoAtivo") as? [String: String] ?? [:]
         ancoraLivre = (defaults.array(forKey: "ancoraLivre") as? [Double]).flatMap { $0.count == 2 ? CGPoint(x: $0[0], y: $0[1]) : nil }
     }
 }

@@ -258,6 +258,17 @@ final class Carteira {
     // Valor, resultado em aberto e realizado de uma linha, na moeda escolhida (ou na do ativo, sem câmbio).
     func resumo(_ linha: Linha) -> Total { resumir(linha, em: moeda, cambio: snapshot.cambio) }
 
+    // A moeda da linha na tabela, no notch e na aba Binance: a escolhida para o ativo ou a própria (a da cotação:
+    // B3 em reais, bolsa de fora e cripto em dólar). Gráficos de um eixo só e totais usam resumo(), na dos Ajustes.
+    func moedaDe(_ linha: Linha) -> String { Ajustes.atual.moedaDoAtivo[linha.ativo.id] ?? linha.moeda }
+    func resumoDoAtivo(_ linha: Linha) -> Total { resumir(linha, em: moedaDe(linha), cambio: snapshot.cambio) }
+
+    // Um preço da linha (cotação, preço médio) na moeda dela; sem câmbio, fica na moeda de origem.
+    func naMoedaDe(_ linha: Linha, _ valor: Double, de origem: String) -> (valor: Double, moeda: String) {
+        let m = moedaDe(linha)
+        return converter(valor, de: origem, para: m, cambio: snapshot.cambio).map { ($0, m) } ?? (valor, origem)
+    }
+
     // Só quem nunca teve cotação: quem já teve mostra a última e, passados 2 min, o aviso de dado velho.
     // Saldo da Binance também: fora do total, que sem o aviso pareceria completo.
     var simbolosSemCotacao: [String] {

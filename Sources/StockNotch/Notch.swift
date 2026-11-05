@@ -689,7 +689,7 @@ struct LinhaNotch: View {
     }
 
     @ViewBuilder private var principal: some View {
-        let r = carteira.resumo(linha)
+        let r = carteira.resumoDoAtivo(linha)
         let situacao = linha.quantidade > 0 ? tr("\(qtd(linha.quantidade)) un.", "Qty \(qtd(linha.quantidade))")
             : linha.desejo ? tr("lista de desejos", "wishlist") : tr("posição encerrada", "position closed")
         HStack(spacing: 10) {
@@ -713,7 +713,8 @@ struct LinhaNotch: View {
                 MiniGrafico(pontos: carteira.serie(linha), cotacao: c)
                 // Largura mínima de um preço de seis dígitos: os minigráficos formam coluna.
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(dinheiro(c.preco, c.moeda, oculto: false))
+                    let preco = carteira.naMoedaDe(linha, c.preco, de: c.moeda)
+                    Text(dinheiro(preco.valor, preco.moeda, oculto: false))
                         .font(.system(size: 13, weight: .medium))
                         .contentTransition(.numericText())
                     // Preço na moeda do ativo; resultado e valor da posição na moeda escolhida, pela conta do total.
