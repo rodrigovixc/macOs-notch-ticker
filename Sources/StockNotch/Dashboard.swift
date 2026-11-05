@@ -311,7 +311,7 @@ struct VisaoGeralTela: View {
                     if !privacidade {
                         AxisMarks { v in
                             AxisGridLine().foregroundStyle(Color.secondary.opacity(0.2))
-                            AxisValueLabel { if let n = v.as(Double.self) { Text(compacto(n, moeda: moeda)) } }
+                            AxisValueLabel { if let n = v.as(Double.self) { Text(valorCompacto(n, moeda: moeda)) } }
                         }
                     }
                 }
@@ -513,10 +513,11 @@ struct VisaoGeralTela: View {
         .modifier(FundoCartao())
     }
 
-    // 1.234.567 → "R$ 1,2 mi" no eixo, onde não cabe o valor inteiro.
-    private func compacto(_ v: Double, moeda: String) -> String {
-        v.formatted(.currency(code: moeda).notation(.compactName).precision(.fractionLength(0...1)).locale(Ajustes.atual.idioma.locale))
-    }
+}
+
+// 1.234.567 → "R$ 1,2 mi" no eixo, onde não cabe o valor inteiro.
+@MainActor func valorCompacto(_ v: Double, moeda: String) -> String {
+    v.formatted(.currency(code: moeda).notation(.compactName).precision(.fractionLength(0...1)).locale(Ajustes.atual.idioma.locale))
 }
 
 // As criptos da Binance num eixo só, em % contra o preço médio de cada uma (preços de R$ 1 e de R$ 600 mil não cabem
@@ -580,6 +581,12 @@ struct CriptoContraPrecoMedio: View {
                 RuleMark(y: .value(tr("Preço médio", "Average cost"), 0))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     .foregroundStyle(Color.secondary)
+                    .annotation(position: .top, alignment: .leading) {
+                        Text(tr("▲ lucro", "▲ gain")).font(.caption2).foregroundStyle(cor(1))
+                    }
+                    .annotation(position: .bottom, alignment: .leading) {
+                        Text(tr("▼ prejuízo", "▼ loss")).font(.caption2).foregroundStyle(cor(-1))
+                    }
                 ForEach(visiveis, id: \.simbolo) { s in
                     ForEach(s.pontos, id: \.em) { p in
                         LineMark(x: .value("Data", p.em), y: .value("%", p.preco), series: .value("Moeda", s.simbolo))
@@ -656,5 +663,77 @@ struct CriptoContraPrecoMedio: View {
         }
         .padding(8)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+// Quanto custou cada saldo da Binance com preço médio e quanto vale agora, lado a lado, na moeda escolhida: a barra de
+// hoje fica verde ou vermelha pelo resultado, e o número dele vem escrito (cor nunca sozinha).
+struct PagoContraHoje: View {
+    @Environment(Carteira.self) private var carteira
+
+    private struct Item: Identifiable {
+        let simbolo: String
+        let quantidade: Double
+        let r: Total
+        var id: String { simbolo }
+    }
+
+    var body: some View {
+        let itens = carteira.linhasBinance.compactMap { l -> Item? in
+            let r = carteira.resumo(l)
+            return r.custo > 0 && l.quantidade > 0 ? Item(simbolo: l.ativo.simbolo, quantidade: l.quantidade, r: r) : nil
+        }
+        let privacidade = Ajustes.atual.privacidade
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 14) {
+                chave(tr("Quanto pagou", "What you paid"), Color.secondary.opacity(0.45))
+                chave(tr("Quanto vale hoje", "What it's worth now"), cor(1), cor(-1))
+            }
+            Chart(itens) { i in
+                BarMark(x: .value("Valor", i.r.custo), y: .value("Moeda", i.simbolo), height: .fixed(11))
+                    .position(by: .value("Série", "pago"))
+                    .foregroundStyle(Color.secondary.opacity(0.45))
+                    .cornerRadius(3)
+                    .annotation(position: .trailing, alignment: .leading) {
+                        // Preço por unidade, que é o que a Binance mostra; a barra é o total.
+                        Text(valor: tr("médio ", "avg ") + dinheiro(i.r.custo / i.quantidade, i.r.moeda))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                BarMark(x: .value("Valor", i.r.patrimonio), y: .value("Moeda", i.simbolo), height: .fixed(11))
+                    .position(by: .value("Série", "hoje"))
+                    .foregroundStyle(cor(i.r.aberto.lucro))
+                    .cornerRadius(3)
+                    .annotation(position: .trailing, alignment: .leading) {
+                        // Arredondado aos centavos: abaixo de 1 o dinheiro() mostraria até 6 casas, que são para preço, não resultado.
+                        Text(valor: tr("hoje ", "now ") + dinheiro(i.r.patrimonio / i.quantidade, i.r.moeda, oculto: false)
+                             + "  \(dinheiro((i.r.aberto.lucro * 100).rounded() / 100, i.r.moeda, sinal: true)) (\(pct(i.r.aberto.percentual)))")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(cor(i.r.aberto.lucro))
+                            .monospacedDigit()
+                    }
+            }
+            .chartLegend(.hidden)
+            .chartYAxis { AxisMarks(position: .leading) { AxisValueLabel().font(.caption.weight(.semibold)) } }
+            .chartXAxis {
+                if !privacidade {
+                    AxisMarks { v in
+                        AxisGridLine().foregroundStyle(Color.secondary.opacity(0.2))
+                        AxisValueLabel { if let n = v.as(Double.self) { Text(valorCompacto(n, moeda: itens.first?.r.moeda ?? carteira.moeda)) } }
+                    }
+                }
+            }
+            .chartXScale(range: .plotDimension(endPadding: 280))  // espaço para o resultado escrito na ponta
+            .frame(height: CGFloat(itens.count) * 46 + 24)
+            .accessibilityLabel(tr("Quanto pagou e quanto vale hoje cada moeda", "What each coin cost and what it is worth now"))
+        }
+    }
+
+    private func chave(_ texto: String, _ cores: Color...) -> some View {
+        HStack(spacing: 5) {
+            HStack(spacing: 1) { ForEach(cores.indices, id: \.self) { RoundedRectangle(cornerRadius: 2).fill(cores[$0]).frame(width: 10, height: 10) } }
+            Text(texto).font(.caption).foregroundStyle(.secondary)
+        }
     }
 }

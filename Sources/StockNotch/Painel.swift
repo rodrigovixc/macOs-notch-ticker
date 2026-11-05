@@ -678,6 +678,9 @@ struct BinanceTela: View {
                         .monospacedDigit()
                     }
                 }
+                if carteira.linhasBinance.contains(where: { ($0.custo ?? 0) > 0 }) {
+                    Section(tr("Lucro ou prejuízo por moeda", "Gain or loss by coin")) { PagoContraHoje() }
+                }
                 if !carteira.criptoContraPrecoMedio.isEmpty {
                     Section {
                         CriptoContraPrecoMedio()

@@ -777,7 +777,7 @@ struct DetalheAcao: View {
                 (tr("Vol. médio 3M", "Avg. vol. 3M"), i.averageDailyVolume3Month.map(compacto)),
                 (tr("Máx. 52 sem.", "52-wk high"), preco(i.fiftyTwoWeekHigh)),
                 (tr("Mín. 52 sem.", "52-wk low"), preco(i.fiftyTwoWeekLow)),
-                (tr("Valor de mercado", "Market cap"), i.marketCap.map { compacto($0, moeda: m) }),
+                (tr("Valor de mercado", "Market cap"), i.marketCap.map { valorCompacto($0, moeda: m) }),
                 (tr("P/L", "P/E"), i.trailingPE.map(numero2)),
                 (tr("LPA", "EPS"), preco(i.epsTrailingTwelveMonths)),
                 (tr("Div. yield", "Div. yield"), i.dividendYield.map { pct($0 / 100, sinal: false) }),
@@ -809,10 +809,6 @@ struct DetalheAcao: View {
     // 19.361.000 → "19,4 mi"; com moeda, "R$ 668,4 bi".
     private func compacto(_ v: Double) -> String {
         v.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Ajustes.atual.idioma.locale))
-    }
-
-    private func compacto(_ v: Double, moeda: String) -> String {
-        v.formatted(.currency(code: moeda).notation(.compactName).precision(.fractionLength(0...1)).locale(Ajustes.atual.idioma.locale))
     }
 }
 
