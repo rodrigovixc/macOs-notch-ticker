@@ -148,11 +148,11 @@ private let btc = Cotacao(preco: 77_840, variacao: 77_840 / 76_816.01 - 1, moeda
 
 // Cotação completa do Yahoo (v7/quote) de 04/11/2026, só alguns campos: o que o detalhe do notch mostra.
 @Test func indicadoresDoYahoo() throws {
-    let json = #"{"quoteResponse":{"result":[{"symbol":"PETR4.SA","currency":"BRL","regularMarketOpen":50.04,"regularMarketDayHigh":50.31,"regularMarketDayLow":48.91,"regularMarketPreviousClose":50.71,"regularMarketVolume":19361000,"averageDailyVolume3Month":51279641,"fiftyTwoWeekHigh":59.79,"fiftyTwoWeekLow":29.53,"marketCap":668417720320,"trailingPE":4.663489,"epsTrailingTwelveMonths":10.49,"dividendYield":7.23,"priceToBook":1.3109657}],"error":null}}"#
+    let json = #"{"quoteResponse":{"result":[{"symbol":"PETR4.SA","currency":"BRL","regularMarketOpen":50.04,"regularMarketDayHigh":50.31,"regularMarketDayLow":48.91,"regularMarketPreviousClose":50.71,"regularMarketVolume":19361000,"averageDailyVolume3Month":51279641,"fiftyTwoWeekHigh":59.79,"fiftyTwoWeekLow":29.53,"marketCap":668417720320,"trailingPE":4.663489,"epsTrailingTwelveMonths":10.49,"dividendYield":0.84,"trailingAnnualDividendYield":0.0723,"priceToBook":1.3109657}],"error":null}}"#
     struct R: Decodable { struct L: Decodable { let result: [Indicadores] }; let quoteResponse: L }
     let i = try #require(try JSONDecoder().decode(R.self, from: Data(json.utf8)).quoteResponse.result.first)
     #expect(i.currency == "BRL" && i.regularMarketOpen == 50.04 && i.marketCap == 668_417_720_320)
-    #expect(i.trailingPE == 4.663489 && i.dividendYield == 7.23 && i.fiftyTwoWeekLow == 29.53)
+    #expect(i.trailingPE == 4.663489 && i.trailingAnnualDividendYield == 0.0723 && i.fiftyTwoWeekLow == 29.53)
     // Ação sem fundamentos (ETF, recém-listada): os campos faltam e a resposta continua legível.
     let vazio = try JSONDecoder().decode(Indicadores.self, from: Data(#"{"currency":"USD"}"#.utf8))
     #expect(vazio.trailingPE == nil && vazio.marketCap == nil)

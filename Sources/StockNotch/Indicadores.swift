@@ -15,7 +15,9 @@ struct Indicadores: Decodable, Equatable {
     let marketCap: Double?
     let trailingPE: Double?
     let epsTrailingTwelveMonths: Double?
-    let dividendYield: Double?  // em pontos percentuais (7.23 = 7,23%)
+    // Dividendos pagos nos últimos 12 meses ÷ preço, em fração (0.039 = 3,9%). O "dividendYield" do Yahoo é outra
+    // conta: o último dividendo anunciado projetado para o ano, que no BBAS3 dava 0,84% contra 3,9% pagos.
+    let trailingAnnualDividendYield: Double?
     let priceToBook: Double?
 }
 

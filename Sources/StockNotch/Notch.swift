@@ -791,7 +791,7 @@ struct DetalheAcao: View {
                 (tr("Valor de mercado", "Market cap"), i.marketCap.map { valorCompacto($0, moeda: m) }),
                 (tr("P/L", "P/E"), i.trailingPE.map(numero2)),
                 (tr("LPA", "EPS"), preco(i.epsTrailingTwelveMonths)),
-                (tr("Div. yield", "Div. yield"), i.dividendYield.map { pct($0 / 100, sinal: false) }),
+                (tr("Div. yield", "Div. yield"), i.trailingAnnualDividendYield.map { pct($0, sinal: false) }),
                 (tr("P/VP", "P/B"), i.priceToBook.map(numero2)),
             ]
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), alignment: .leading, spacing: 8) {
