@@ -41,3 +41,18 @@ private func t(_ dia: Double, _ de: String, _ qde: Double, _ para: String, _ qpa
     #expect(usdt.count == 2 && abs(usdt[1].preco - 0.2) < 1e-9)
     #expect(contraPrecoMedio(Serie(moeda: "USD", pontos: dolar), medio: 0, dolar: dolar).isEmpty)
 }
+
+// RSS do Google Notícias: tira o " - Fonte" do título e lê a data.
+@Test func lerRSSDeNoticias() {
+    let xml = """
+    <rss><channel><title>busca</title><item><title>Banco do Brasil (BBAS3) sobe 3% - Valor Econômico</title>
+    <link>https://news.google.com/rss/articles/abc</link><pubDate>Wed, 05 Nov 2026 14:02:00 GMT</pubDate>
+    <source url="https://valor.globo.com">Valor Econômico</source></item>
+    <item><title>sem data</title><link>https://x.com</link></item></channel></rss>
+    """
+    let n = Noticias.lerRSS(Data(xml.utf8), simbolo: "BBAS3")
+    #expect(n.count == 1)
+    #expect(n.first?.titulo == "Banco do Brasil (BBAS3) sobe 3%")
+    #expect(n.first?.fonte == "Valor Econômico")
+    #expect(n.first?.em == Date(timeIntervalSince1970: 1_793_887_320))
+}

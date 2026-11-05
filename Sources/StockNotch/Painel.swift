@@ -5,7 +5,7 @@ import UserNotifications
 
 struct PainelView: View {
     enum Secao: CaseIterable, Identifiable {
-        case visao, carteira, binance, widget, ajustes
+        case visao, carteira, binance, noticias, widget, ajustes
         var id: Self { self }
 
         var icone: String {
@@ -13,6 +13,7 @@ struct PainelView: View {
             case .visao: "chart.pie"
             case .carteira: "briefcase"
             case .binance: "link"
+            case .noticias: "newspaper"
             case .widget: "menubar.rectangle"
             case .ajustes: "gearshape"
             }
@@ -23,6 +24,7 @@ struct PainelView: View {
             case .visao: tr("Visão geral", "Overview")
             case .carteira: tr("Carteira", "Portfolio")
             case .binance: "Binance"
+            case .noticias: tr("Notícias", "News")
             case .widget: "Widget"
             case .ajustes: tr("Ajustes", "Settings")
             }
@@ -51,6 +53,10 @@ struct PainelView: View {
             case .visao: VisaoGeralTela()
             case .carteira: CarteiraTela()
             case .binance: BinanceTela()
+            case .noticias:
+                ScrollView { ColunaNoticias(limite: 60, escuro: false).padding(24).frame(maxWidth: 760, alignment: .leading) }
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .navigationTitle(tr("Notícias", "News"))
             case .widget: WidgetTela()
             case .ajustes: AjustesTela()
             }
@@ -1171,6 +1177,14 @@ struct WidgetTela: View {
             } footer: {
                 nota(tr("Solto, arraste o widget com o mouse para qualquer lugar, em qualquer tela. Ele lembra onde ficou. O vidro vale solto e em telas sem notch; no notch de verdade o widget fica preto, para se fundir com ele.",
                         "When floating, drag the widget anywhere, on any display. It remembers where you left it. Glass applies when floating and on displays without a notch; in a real notch the widget stays black to blend in."))
+            }
+            Section {
+                Toggle(tr("Coluna de últimas notícias", "Latest news column"), isOn: $ajustes.noticias)
+            } header: {
+                Text(tr("Aberto", "Expanded"))
+            } footer: {
+                nota(tr("Ao passar o mouse, o widget mostra ao lado da carteira as notícias dos últimos 2 dias sobre os seus ativos (Google Notícias, de 10 em 10 minutos). Clique numa para abrir no navegador. Também ficam na aba Notícias.",
+                        "On hover, the widget shows news from the last 2 days about your assets next to your portfolio (Google News, every 10 minutes). Click one to open it in the browser. They're also in the News tab."))
             }
             Section {
                 Picker(tr("Mostrar", "Show"), selection: $ajustes.estilo) {

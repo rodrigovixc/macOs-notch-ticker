@@ -86,6 +86,11 @@ final class Ajustes {
         didSet { defaults.set(foraDoLetreiro.sorted(), forKey: "foraDoLetreiro") }
     }
 
+    // Coluna de últimas notícias ao lado da carteira no widget aberto.
+    var noticias: Bool {
+        didSet { defaults.set(noticias, forKey: "noticias") }
+    }
+
     // Ativo.id → moeda em que a linha dele aparece (BRL, USD, EUR). Sem entrada, a própria do ativo. Os totais
     // seguem a moeda acima: somar reais com dólares só dá certo numa moeda só.
     var moedaDoAtivo: [String: String] {
@@ -115,6 +120,7 @@ final class Ajustes {
         quantos = defaults.object(forKey: "quantos") as? Int ?? 1
         dividir = defaults.bool(forKey: "dividir")
         foraDoLetreiro = Set(defaults.stringArray(forKey: "foraDoLetreiro") ?? [])
+        noticias = defaults.bool(forKey: "noticias")
         moedaDoAtivo = defaults.dictionary(forKey: "moedaDoAtivo") as? [String: String] ?? [:]
         ancoraLivre = (defaults.array(forKey: "ancoraLivre") as? [Double]).flatMap { $0.count == 2 ? CGPoint(x: $0[0], y: $0[1]) : nil }
     }

@@ -208,6 +208,7 @@ struct NotchView: View {
     @State private var indice = 0
 
     private let larguraAberta: CGFloat = 480  // cabe o minigráfico ao lado do preço
+    private let larguraNoticias: CGFloat = 320  // a coluna de notícias, quando ligada
 
     private var livre: Bool { Ajustes.atual.posicao == .livre }
     private var geo: NotchGeometria { livre ? .solta : geometria }
@@ -275,7 +276,7 @@ struct NotchView: View {
                 fechado.transition(.opacity)
             }
         }
-        .frame(width: expandido ? max(larguraAberta, larguraFechada) : larguraFechada, alignment: .top)
+        .frame(width: expandido ? max(larguraAberta + (Ajustes.atual.noticias ? larguraNoticias : 0), larguraFechada) : larguraFechada, alignment: .top)
         .frame(minHeight: geo.altura, alignment: .top)
         .modifier(FundoWidget(forma: forma, vidro: Ajustes.atual.vidro && semVao, contorno: livre))
         .contentShape(forma)
@@ -483,9 +484,18 @@ struct NotchView: View {
             if carteira.linhas.isEmpty && carteira.linhasBinance.isEmpty {
                 vazio
             } else {
-                resumo
-                Divider().overlay(Color.white.opacity(0.12))
-                lista
+                HStack(alignment: .top, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        resumo
+                        Divider().overlay(Color.white.opacity(0.12))
+                        lista
+                    }
+                    .frame(width: larguraAberta - 40)
+                    if Ajustes.atual.noticias {
+                        Divider().overlay(Color.white.opacity(0.12))
+                        ColunaNoticias().frame(width: larguraNoticias - 19)
+                    }
+                }
             }
             rodape
         }

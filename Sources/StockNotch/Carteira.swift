@@ -187,6 +187,9 @@ final class Carteira {
     private var credencial: Credencial?
     private(set) var erroChave: Falha?  // chave salva que o macOS não deixou ler; ver lerChave()
     private(set) var indicadores: [String: Indicadores] = [:]  // por ativo, para o detalhe do notch
+    private(set) var noticias: [Noticia] = []  // da mais nova para a mais antiga (ver carregarNoticias)
+    private(set) var noticiasEm: Date?  // fim da última busca; nil enquanto a primeira não termina
+    @ObservationIgnored private var noticiasPedidas: (em: Date, de: Set<String>)?
     // Fechamentos diários de um ano, para o gráfico do patrimônio na Visão geral (ver carregarHistorico).
     private(set) var historico: [String: Serie] = [:]
     private(set) var historicoCambio: [String: [Ponto]] = [:]
@@ -342,6 +345,27 @@ final class Carteira {
         historico = series.compactMapValues { $0 }
         semHistorico = ativos.filter { series[$0.key] == nil }.map(\.value.simbolo).sorted()
         if !semHistorico.isEmpty { historicoEm = nil }  // tenta de novo na próxima vez que a tela abrir
+    }
+
+    // Um pedido por ativo, no máximo a cada 9 min (ou já, se a carteira mudou). Falha de um ativo não apaga os outros:
+    // fica a notícia que já havia dele.
+    func carregarNoticias() async {
+        let ativos = ativosComNoticia
+        let ids = Set(ativos.map(\.id))
+        if let p = noticiasPedidas, p.de == ids, Date.now.timeIntervalSince(p.em) < 540 { return }
+        noticiasPedidas = (.now, ids)
+        let ingles = Ajustes.atual.idioma == .en
+        var novas: [String: [Noticia]] = [:]
+        await withTaskGroup(of: (String, [Noticia]?).self) { grupo in
+            for a in ativos { grupo.addTask { (a.simbolo, try? await Noticias.buscar(a, ingles: ingles)) } }
+            for await (simbolo, lista) in grupo { novas[simbolo] = lista ?? noticias.filter { $0.simbolo == simbolo } }
+        }
+        // No máximo 3 por ativo, para BTC não ocupar a coluna inteira; mesma notícia em dois ativos aparece uma vez.
+        var vistos = Set<String>()
+        noticias = novas.values.flatMap { $0.sorted { $0.em > $1.em }.prefix(3) }
+            .sorted { $0.em > $1.em }
+            .filter { vistos.insert($0.titulo).inserted }
+        noticiasEm = .now
     }
 
     // Ao parar o mouse numa ação no notch. No máximo a cada 5 min por ativo: os fundamentos mudam devagar, e o
