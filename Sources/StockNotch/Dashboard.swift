@@ -518,3 +518,143 @@ struct VisaoGeralTela: View {
         v.formatted(.currency(code: moeda).notation(.compactName).precision(.fractionLength(0...1)).locale(Ajustes.atual.idioma.locale))
     }
 }
+
+// As criptos da Binance num eixo só, em % contra o preço médio de cada uma (preços de R$ 1 e de R$ 600 mil não cabem
+// num eixo em reais). Até 8 de uma vez, os 8 tons da paleta categórica: cada moeda guarda o tom que pegou ao ser
+// escolhida, e tirar uma não repinta as outras. Começa com as 5 maiores posições.
+struct CriptoContraPrecoMedio: View {
+    @Environment(Carteira.self) private var carteira
+    @AppStorage("criptoNoGrafico") private var guardado = ""  // "BTC:0,ETH:1": moeda e tom
+    @State private var periodo: VisaoGeralTela.Periodo = .ano
+    @State private var selecionado: Date?
+
+    static let tons: [Color] = [
+        Color(claro: 0x2A78D6, escuro: 0x3987E5), Color(claro: 0xEB6834, escuro: 0xD95926),
+        Color(claro: 0x1BAF7A, escuro: 0x199E70), Color(claro: 0xEDA100, escuro: 0xC98500),
+        Color(claro: 0xE87BA4, escuro: 0xD55181), Color(claro: 0x008300, escuro: 0x008300),
+        Color(claro: 0x6250D6, escuro: 0x9085E9), Color(claro: 0xE34948, escuro: 0xE66767),
+    ]
+
+    private var series: [(simbolo: String, pontos: [Ponto])] { carteira.criptoContraPrecoMedio }
+
+    private var escolhidas: [String: Int] {
+        let lidas = Dictionary(guardado.split(separator: ",").compactMap { par -> (String, Int)? in
+            let p = par.split(separator: ":")
+            guard p.count == 2, let tom = Int(p[1]), Self.tons.indices.contains(tom) else { return nil }
+            return (String(p[0]), tom)
+        }, uniquingKeysWith: { a, _ in a })
+        guard guardado.isEmpty else { return lidas }
+        let maiores = carteira.linhasBinance.map(\.ativo.simbolo).filter { s in series.contains { $0.simbolo == s } }.prefix(5)
+        return Dictionary(uniqueKeysWithValues: maiores.enumerated().map { ($1, $0) })
+    }
+
+    private func alternar(_ simbolo: String) {
+        var e = escolhidas
+        if e[simbolo] != nil {
+            e[simbolo] = nil
+        } else if let livre = Self.tons.indices.first(where: { !e.values.contains($0) }) {
+            e[simbolo] = livre
+        }
+        guardado = e.isEmpty ? "," : e.map { "\($0):\($1)" }.sorted().joined(separator: ",")  // "," = nenhuma (vazio é o padrão)
+    }
+
+    private func noPeriodo(_ pontos: [Ponto]) -> [Ponto] {
+        let inicio = Date.now.addingTimeInterval(-Double(periodo.rawValue) * 86_400)
+        return pontos.filter { $0.em >= inicio }
+    }
+
+    var body: some View {
+        let e = escolhidas
+        let visiveis = series.filter { e[$0.simbolo] != nil }.map { (simbolo: $0.simbolo, pontos: noPeriodo($0.pontos)) }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Spacer()
+                Picker(tr("Período", "Period"), selection: $periodo) {
+                    ForEach([VisaoGeralTela.Periodo.mes, .semestre, .ano]) { Text($0.rotulo).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 150)
+            }
+            Chart {
+                RuleMark(y: .value(tr("Preço médio", "Average cost"), 0))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .foregroundStyle(Color.secondary)
+                ForEach(visiveis, id: \.simbolo) { s in
+                    ForEach(s.pontos, id: \.em) { p in
+                        LineMark(x: .value("Data", p.em), y: .value("%", p.preco), series: .value("Moeda", s.simbolo))
+                            .foregroundStyle(Self.tons[e[s.simbolo] ?? 0])
+                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    }
+                }
+                if let sel = selecionado {
+                    RuleMark(x: .value("Data", sel))
+                        .foregroundStyle(Color.secondary.opacity(0.35))
+                        .annotation(position: .top, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) { dica(sel, visiveis, e) }
+                }
+            }
+            .chartXSelection(value: $selecionado)
+            .chartYAxis {
+                AxisMarks { v in
+                    AxisGridLine().foregroundStyle(Color.secondary.opacity(0.2))
+                    AxisValueLabel { if let n = v.as(Double.self) { Text(pct(n)) } }
+                }
+            }
+            .chartXAxis { AxisMarks(preset: .aligned) { _ in AxisValueLabel(format: .dateTime.day().month(.abbreviated)) } }
+            .frame(height: 240)
+            .accessibilityLabel(tr("Gráfico das criptos contra o preço médio", "Crypto vs. average cost chart"))
+
+            // A legenda é o filtro: cor nunca sozinha, com o nome e o quanto está acima ou abaixo hoje.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 6)], alignment: .leading, spacing: 6) {
+                ForEach(series, id: \.simbolo) { s in
+                    let tom = e[s.simbolo]
+                    let cheio = tom == nil && e.count >= Self.tons.count
+                    Button { alternar(s.simbolo) } label: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(tom.map { Self.tons[$0] } ?? .clear)
+                                .strokeBorder(tom == nil ? Color.secondary : .clear, lineWidth: 1)
+                                .frame(width: 9, height: 9)
+                            Text(s.simbolo).fontWeight(.semibold)
+                            Spacer(minLength: 2)
+                            if let hoje = s.pontos.last?.preco { Text(pct(hoje)).foregroundStyle(cor(hoje)) }
+                        }
+                        .font(.caption)
+                        .monospacedDigit()
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(tom == nil ? 0.05 : 0.12)))
+                        .opacity(tom == nil ? 0.6 : 1)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(cheio)
+                    .help(cheio ? tr("Já há 8 moedas no gráfico: tire uma antes.", "There are already 8 coins on the chart: remove one first.")
+                                : tom == nil ? tr("Mostrar no gráfico", "Show on chart") : tr("Tirar do gráfico", "Remove from chart"))
+                    .accessibilityValue(tom == nil ? tr("oculta", "hidden") : tr("no gráfico", "on chart"))
+                }
+            }
+        }
+    }
+
+    private func dica(_ instante: Date, _ visiveis: [(simbolo: String, pontos: [Ponto])], _ e: [String: Int]) -> some View {
+        let linhas = visiveis.compactMap { s -> (String, Double)? in
+            s.pontos.min { abs($0.em.timeIntervalSince(instante)) < abs($1.em.timeIntervalSince(instante)) }.map { (s.simbolo, $0.preco) }
+        }.sorted { $0.1 > $1.1 }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(quando(instante, data: .abbreviated)).font(.caption2).foregroundStyle(.secondary)
+            ForEach(linhas, id: \.0) { simbolo, v in
+                HStack(spacing: 5) {
+                    Circle().fill(Self.tons[e[simbolo] ?? 0]).frame(width: 7, height: 7)
+                    Text(simbolo)
+                    Spacer(minLength: 8)
+                    Text(pct(v)).foregroundStyle(cor(v))
+                }
+                .font(.caption2)
+                .monospacedDigit()
+            }
+        }
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
+}

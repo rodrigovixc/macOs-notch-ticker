@@ -107,7 +107,28 @@ extension Fonte {
     }
 }
 
+// Quanto o preço em reais esteve acima (ou abaixo) do preço médio, dia a dia: 0,1 = 10% acima. Série em dólar passa
+// a reais pelo dólar do dia; a de preço fixo (USDT, um ponto só) é o próprio dólar.
+func contraPrecoMedio(_ serie: Serie, medio: Double, dolar: [Ponto]) -> [Ponto] {
+    guard medio > 0 else { return [] }
+    if serie.moeda == "BRL" { return serie.pontos.map { Ponto(em: $0.em, preco: $0.preco / medio - 1) } }
+    if serie.pontos.count == 1, let fixo = serie.pontos.first?.preco {
+        return dolar.map { Ponto(em: $0.em, preco: fixo * $0.preco / medio - 1) }
+    }
+    return serie.pontos.compactMap { p in valor(dolar, em: p.em).map { Ponto(em: p.em, preco: p.preco * $0 / medio - 1) } }
+}
+
 extension Carteira {
+    // Cada saldo da Binance com preço médio contra ele no último ano, em ordem alfabética (a da legenda).
+    var criptoContraPrecoMedio: [(simbolo: String, pontos: [Ponto])] {
+        let dolar = historicoCambio["USD"] ?? []
+        return linhasBinance.compactMap { l -> (simbolo: String, pontos: [Ponto])? in
+            guard let m = precoMedio[l.ativo.simbolo], let s = historico[l.ativo.id] else { return nil }
+            let pontos = contraPrecoMedio(s, medio: m, dolar: dolar)
+            return pontos.count > 1 ? (l.ativo.simbolo, pontos) : nil
+        }.sorted { $0.simbolo < $1.simbolo }
+    }
+
     // Cada posição pelo valor de hoje na moeda escolhida, para a alocação. Vazia sem total (falta câmbio).
     var fatias: [Fatia] {
         guard total != nil else { return [] }

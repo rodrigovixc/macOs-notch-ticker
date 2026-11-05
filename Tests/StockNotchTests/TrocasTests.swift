@@ -28,3 +28,16 @@ private func t(_ dia: Double, _ de: String, _ qde: Double, _ para: String, _ qpa
     let medio = precoMedioEmReais([t(1, "XYZ", 10, "BTC", 1), t(2, "BRL", 200, "BTC", 1)], moedas: ["BTC"]) { _, _ in nil }
     #expect(medio["BTC"] == 200)
 }
+
+// Em reais direto, em dólar pelo dólar do dia, e o USDT (preço fixo) pelo próprio dólar.
+@Test func precoContraPrecoMedio() {
+    let d = { (n: Double) in Date(timeIntervalSince1970: n * 86_400) }
+    let dolar = [Ponto(em: d(1), preco: 5), Ponto(em: d(2), preco: 6)]
+    let emReais = contraPrecoMedio(Serie(moeda: "BRL", pontos: [Ponto(em: d(1), preco: 110)]), medio: 100, dolar: dolar)
+    #expect(abs(emReais[0].preco - 0.1) < 1e-9)
+    let emDolar = contraPrecoMedio(Serie(moeda: "USD", pontos: [Ponto(em: d(1), preco: 20), Ponto(em: d(2), preco: 20)]), medio: 100, dolar: dolar)
+    #expect(emDolar.count == 2 && emDolar[0].preco == 0 && abs(emDolar[1].preco - 0.2) < 1e-9)
+    let usdt = contraPrecoMedio(Serie(moeda: "USD", pontos: [Ponto(em: .distantPast, preco: 1)]), medio: 5, dolar: dolar)
+    #expect(usdt.count == 2 && abs(usdt[1].preco - 0.2) < 1e-9)
+    #expect(contraPrecoMedio(Serie(moeda: "USD", pontos: dolar), medio: 0, dolar: dolar).isEmpty)
+}

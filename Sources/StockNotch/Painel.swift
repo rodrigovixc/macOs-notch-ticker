@@ -678,6 +678,19 @@ struct BinanceTela: View {
                         .monospacedDigit()
                     }
                 }
+                if !carteira.criptoContraPrecoMedio.isEmpty {
+                    Section {
+                        CriptoContraPrecoMedio()
+                    } header: {
+                        Text(tr("Preço contra o preço médio", "Price vs. average cost"))
+                    } footer: {
+                        Text(tr("Quanto cada moeda está acima ou abaixo do que você pagou em média, dia a dia. A linha tracejada (0%) é o preço médio. Clique na legenda para escolher as moedas (até 8).",
+                                "How far each coin is above or below what you paid on average, day by day. The dashed line (0%) is the average cost. Click the legend to choose coins (up to 8)."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
                 if !carteira.linhasBinance.isEmpty {
                     Section {
                         // Em ordem alfabética: a lista de saldos muda de ordem com as cotações e o campo pularia.
@@ -697,6 +710,7 @@ struct BinanceTela: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)  // os grupos ficam como cartões sobre o vidro
         .navigationTitle("Binance")
+        .task { await carteira.carregarHistorico() }
         .toolbar {
             ToolbarItem {
                 Button { Task { await carteira.atualizar() } } label: { Label(tr("Atualizar", "Refresh"), systemImage: "arrow.clockwise") }
