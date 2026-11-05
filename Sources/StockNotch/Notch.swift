@@ -210,6 +210,13 @@ struct NotchView: View {
     private let larguraAberta: CGFloat = 480  // cabe o minigráfico ao lado do preço
     private let larguraNoticias: CGFloat = 320  // a coluna de notícias, quando ligada
 
+    // Aberto, o widget não fica mais estreito que fechado (vários ativos lado a lado passam de 480). Sem notícias, o
+    // que sobra à direita mostra os indicadores das ações; pouco espaço só alarga a lista.
+    private var sobra: CGFloat { max(larguraFechada - larguraAberta, 0) }
+    private var temAcao: Bool { carteira.linhas.contains { !$0.ativo.cripto } }
+    private var lado: Lado? { Ajustes.atual.noticias ? .noticias : sobra >= 200 && temAcao ? .indicadores : nil }
+    private enum Lado { case noticias, indicadores }
+
     private var livre: Bool { Ajustes.atual.posicao == .livre }
     private var geo: NotchGeometria { livre ? .solta : geometria }
 
@@ -276,7 +283,7 @@ struct NotchView: View {
                 fechado.transition(.opacity)
             }
         }
-        .frame(width: expandido ? max(larguraAberta + (Ajustes.atual.noticias ? larguraNoticias : 0), larguraFechada) : larguraFechada, alignment: .top)
+        .frame(width: expandido ? max(larguraAberta + (lado == .noticias ? larguraNoticias : 0), larguraFechada) : larguraFechada, alignment: .top)
         .frame(minHeight: geo.altura, alignment: .top)
         .modifier(FundoWidget(forma: forma, vidro: Ajustes.atual.vidro && semVao, contorno: livre))
         .contentShape(forma)
@@ -490,10 +497,13 @@ struct NotchView: View {
                         Divider().overlay(Color.white.opacity(0.12))
                         lista
                     }
-                    .frame(width: larguraAberta - 40)
-                    if Ajustes.atual.noticias {
+                    .frame(minWidth: larguraAberta - 40, maxWidth: lado == nil ? .infinity : larguraAberta - 40)
+                    if let lado {
                         Divider().overlay(Color.white.opacity(0.12))
-                        ColunaNoticias().frame(width: larguraNoticias - 19)
+                        Group {
+                            if lado == .noticias { ColunaNoticias() } else { ColunaIndicadores() }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -769,6 +779,59 @@ struct LinhaNotch: View {
     }
 }
 
+// P/L e P/VP: duas casas no formato do idioma (7,65).
+@MainActor private func numero2(_ v: Double) -> String {
+    v.formatted(.number.precision(.fractionLength(2)).locale(Ajustes.atual.idioma.locale))
+}
+
+// Os fundamentos de cada ação lado a lado com a lista, sem precisar parar o mouse na linha: P/L, P/VP, dividendos e
+// onde o preço está entre a mínima e a máxima do ano.
+struct ColunaIndicadores: View {
+    @Environment(Carteira.self) private var carteira
+
+    var body: some View {
+        let acoes = Array(carteira.linhas.filter { !$0.ativo.cripto }.prefix(6))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 4) {
+                Image(systemName: "chart.bar.doc.horizontal")
+                Text(tr("INDICADORES", "INDICATORS")).tracking(0.6)
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            ForEach(acoes) { l in
+                let i = carteira.indicadores[l.ativo.id]
+                let m = i?.currency ?? l.moeda
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(l.ativo.simbolo).font(.system(size: 12, weight: .semibold))
+                    HStack(alignment: .top, spacing: 12) {
+                        item(tr("P/L", "P/E"), i?.trailingPE.map(numero2))
+                        item(tr("P/VP", "P/B"), i?.priceToBook.map(numero2))
+                        item("Div. yield", i?.trailingAnnualDividendYield.map { pct($0, sinal: false) })
+                    }
+                    if let min = i?.fiftyTwoWeekLow, let max = i?.fiftyTwoWeekHigh {
+                        Text(tr("52 sem.: \(dinheiro(min, m, oculto: false)) – \(dinheiro(max, m, oculto: false))",
+                                "52 wk: \(dinheiro(min, m, oculto: false)) – \(dinheiro(max, m, oculto: false))"))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .monospacedDigit()
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .task(id: acoes.map(\.id)) {
+            for l in acoes { await carteira.carregarIndicadores(l.ativo) }
+        }
+    }
+
+    private func item(_ rotulo: String, _ valor: String?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(rotulo).font(.system(size: 9.5)).foregroundStyle(.secondary)
+            Text(valor ?? "—").font(.system(size: 11, weight: .medium))
+        }
+    }
+}
+
 // Os principais indicadores de uma ação, em quatro colunas: o pregão de hoje, o ano e os fundamentos.
 // São dados de mercado, não da carteira: o modo privacidade não esconde.
 struct DetalheAcao: View {
@@ -811,10 +874,6 @@ struct DetalheAcao: View {
                 Text(tr("Buscando indicadores…", "Loading indicators…")).font(.system(size: 10.5)).foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func numero2(_ v: Double) -> String {
-        v.formatted(.number.precision(.fractionLength(2)).locale(Ajustes.atual.idioma.locale))
     }
 
     // 19.361.000 → "19,4 mi"; com moeda, "R$ 668,4 bi".
