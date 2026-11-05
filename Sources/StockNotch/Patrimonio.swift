@@ -135,7 +135,7 @@ extension Carteira {
     // vendas valem a partir da data delas; o saldo da Binance, que o app só conhece hoje, vale como sempre igual.
     func patrimonioHistorico(dias: Int) -> (valor: [Ponto], investido: [Ponto])? {
         guard let total, !historico.isEmpty else { return nil }
-        let precoMedio = precoMedioBinance
+        let precoMedio = self.precoMedio
         let posicoes = posicoesDoHistorico.compactMap { l -> PosicaoNoTempo? in
             guard let serie = historico[l.ativo.id] else { return nil }
             if l.binance {

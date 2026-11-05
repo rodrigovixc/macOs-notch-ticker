@@ -180,7 +180,9 @@ final class Carteira {
     private(set) var falhas: Set<String> = []  // ativos manuais cuja última busca falhou
     private(set) var erroArquivo: Falha?
     private(set) var saldosBinance: [String: Double] = [:]
-    private(set) var precoMedioBinance: [String: Double] = [:]  // em reais, por moeda
+    private(set) var precoMedioBinance: [String: Double] = [:]  // em reais, por moeda, digitado
+    private(set) var precoMedioAuto: [String: Double] = [:]  // em reais, pelas trocas da conta (ver calcularPrecoMedio)
+    @ObservationIgnored private var trocasEm: Date?
     private(set) var erroBinance: (any Error)?
     private var credencial: Credencial?
     private(set) var erroChave: Falha?  // chave salva que o macOS não deixou ler; ver lerChave()
@@ -201,6 +203,10 @@ final class Carteira {
 
     // JSON legível, dá pra fazer backup ou editar à mão
     let arquivo = URL.applicationSupportDirectory.appending(path: "StockNotch/carteira.json")
+    let arquivoTrocas = URL.applicationSupportDirectory.appending(path: "StockNotch/binance-trocas.json")
+
+    // O digitado vale mais que o calculado: depósito vindo de fora não aparece nas trocas.
+    var precoMedio: [String: Double] { precoMedioAuto.merging(precoMedioBinance) { $1 } }
 
     var binanceConectada: Bool { credencial != nil }
     var atualizadoEm: Date? { snapshot.atualizado }
@@ -215,7 +221,7 @@ final class Carteira {
     }
 
     var linhasBinance: [Linha] {
-        linhasDeSaldo(saldosBinance, precoMedio: precoMedioBinance, snapshot: snapshot, moeda: moeda, falhas: falhas)
+        linhasDeSaldo(saldosBinance, precoMedio: precoMedio, snapshot: snapshot, moeda: moeda, falhas: falhas)
     }
 
     // Preço fica na moeda do ativo; valor, resultado e totais vão para a moeda escolhida nos Ajustes.
@@ -267,6 +273,7 @@ final class Carteira {
             guard let lido = try Arquivo.abrir(arquivo) else { return }
             ativos = lido.ativos
             precoMedioBinance = lido.precoMedioBinance
+            precoMedioAuto = lerTrocas().precoMedio
         } catch {
             // Não sobrescreve um arquivo que não conseguiu ler.
             erroArquivo = Falha("Não consegui ler \(arquivo.path). Nada será salvo até corrigir.",
@@ -392,6 +399,7 @@ final class Carteira {
                            "Paste the API Key and Secret Key exactly as Binance shows them.") }
         try await Binance.verificar(cred)
         try Chaveiro.salvar(cred)
+        esquecerTrocas()  // outra conta, outro histórico
         credencial = cred
         await atualizar()
     }
@@ -415,6 +423,42 @@ final class Carteira {
         erroChave = nil
         saldosBinance = [:]
         erroBinance = nil
+        esquecerTrocas()
+    }
+
+    private func lerTrocas() -> HistoricoBinance {
+        (try? JSONDecoder().decode(HistoricoBinance.self, from: Data(contentsOf: arquivoTrocas))) ?? HistoricoBinance()
+    }
+
+    private func esquecerTrocas() {
+        try? FileManager.default.removeItem(at: arquivoTrocas)
+        precoMedioAuto = [:]
+        trocasEm = nil
+    }
+
+    // Preço médio de cada saldo pelas ordens do Spot e pelo Converter, de 6 em 6 horas. A primeira vez percorre o
+    // Converter desde 2020 (um pedido por mês, pausado): leva cerca de um minuto e meio; depois só o que é novo.
+    private func calcularPrecoMedio(_ cred: Credencial) async {
+        if let em = trocasEm, Date.now.timeIntervalSince(em) < 6 * 3600 { return }
+        trocasEm = .now
+        let moedas = Set(saldosBinance.keys).subtracting(["BRL"])
+        var h = lerTrocas()
+        do {
+            try await Binance.buscarTrocas(&h, moedas: moedas, cred)
+        } catch {
+            trocasEm = .now - 6 * 3600 + 300  // tenta de novo em 5 min, de onde parou (pode ser limite de pedidos)
+        }
+        guard credencial?.chave == cred.chave else { return }
+        let trocas = Array(h.trocas.values)
+        if let primeira = trocas.map(\.em).min(),
+           let precos = try? await Binance.precosEmReais(Set(trocas.flatMap { [$0.de, $0.para] }), desde: primeira) {
+            h.precoMedio = precoMedioEmReais(trocas, moedas: moedas) { moeda, t in
+                moeda == "BRL" ? 1 : precos[Troca.dolares.contains(moeda) ? "USDT" : moeda].flatMap { valor($0, em: t) }
+            }
+        }
+        guard credencial?.chave == cred.chave else { return }
+        precoMedioAuto = h.precoMedio
+        try? JSONEncoder().encode(h).write(to: arquivoTrocas, options: .atomic)
     }
 
     func atualizar() async {
@@ -426,6 +470,7 @@ final class Carteira {
                 if credencial?.chave == usada.chave {
                     saldosBinance = saldos
                     erroBinance = nil
+                    Task { await calcularPrecoMedio(usada) }
                 }
             } catch {
                 if credencial?.chave == usada.chave { erroBinance = error }

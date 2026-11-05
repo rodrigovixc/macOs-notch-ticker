@@ -685,8 +685,8 @@ struct BinanceTela: View {
                     } header: {
                         Text(tr("Preço médio de compra (em reais)", "Average purchase price (in reais)"))
                     } footer: {
-                        Text(tr("Quanto você pagou, em média, por unidade de cada moeda. Com ele, o saldo entra no resultado em aberto; em branco, conta só no patrimônio.",
-                                "What you paid on average per unit of each coin. With it, the balance counts toward unrealized return; left blank, only toward portfolio value."))
+                        Text(tr("Calculado pelas suas ordens no Spot e pelo Converter da Binance. Digite um valor para usar o seu no lugar (moeda que veio de depósito não aparece nas trocas); em branco, vale o calculado.",
+                                "Calculated from your Binance Spot orders and Convert history. Type a value to use yours instead (coins deposited from elsewhere don't show up in trades); left blank, the calculated one applies."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -733,10 +733,11 @@ private struct CampoPrecoMedio: View {
         Group {
             if Ajustes.atual.privacidade {
                 // O campo mostraria o número: no modo privacidade fica só a leitura, oculta.
-                LabeledContent(moeda) { Text(valor: carteira.precoMedioBinance[moeda].map { dinheiro($0, "BRL") } ?? tr("Não informado", "Not set")) }
+                LabeledContent(moeda) { Text(valor: carteira.precoMedio[moeda].map { dinheiro($0, "BRL") } ?? tr("Não informado", "Not set")) }
             } else {
                 VStack(alignment: .leading, spacing: 4) {
-                    TextField(moeda, text: $texto, prompt: Text(tr("Não informado", "Not set")))
+                    TextField(moeda, text: $texto, prompt: Text(carteira.precoMedioAuto[moeda]
+                        .map { tr("Da Binance: ", "From Binance: ") + dinheiro($0, "BRL") } ?? tr("Não informado", "Not set")))
                         .focused($focado)
                         .disabled(carteira.erroArquivo != nil)  // não seria salvo
                         .onSubmit(salvar)
